@@ -4,22 +4,37 @@ Dockerized Citron dedicated room server with critical bug fixes.
 
 ## Quick Start
 
-**Private Room**:
+### Private Room
 ```bash
 docker run -d -p 24872:24872/tcp -p 24872:24872/udp \
   -e ROOM_NAME="My Room" \
-  -e PREFERRED_GAME_ID="01006A800016E000" \
+  -e PREFERRED_GAME="Super Smash Bros" \
   crunch41/citron-room-server
 ```
 
-**Public Room**:
+### Public Room
 ```bash
 docker run -d -p 24872:24872/tcp -p 24872:24872/udp \
   -e ROOM_NAME="My Public Room" \
+  -e PREFERRED_GAME="Super Smash Bros" \
   -e USERNAME="your_username" \
   -e TOKEN="your-token" \
   -e WEB_API_URL="https://api.ynet-fun.xyz" \
-  -e PREFERRED_GAME_ID="01006A800016E000" \
+  crunch41/citron-room-server
+```
+
+### Working Example (Unraid)
+Real-world public room configuration running on Unraid:
+```bash
+docker run -d -p 24872:24872/tcp -p 24872:24872/udp \
+  -e ROOM_NAME="My Awesome Server" \
+  -e ROOM_DESCRIPTION="Welcome to my room!" \
+  -e PREFERRED_GAME="Mario Kart 8" \
+  -e PREFERRED_GAME_ID="0100152000022000" \
+  -e USERNAME="YourUsername" \
+  -e TOKEN="12345678-1234-1234-1234-123456789abc" \
+  -e WEB_API_URL="https://api.ynet-fun.xyz" \
+  -v /mnt/cache/appdata/citron-room:/home/citron/.local/share/citron-room \
   crunch41/citron-room-server
 ```
 
@@ -27,16 +42,20 @@ docker run -d -p 24872:24872/tcp -p 24872:24872/udp \
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `ROOM_NAME` | No | Citron Room | Room name |
+| `ROOM_NAME` | **Yes** | - | Room name (shown in lobby) |
+| `PREFERRED_GAME` | **Yes** | - | Game name (shown in lobby) |
 | `ROOM_DESCRIPTION` | No | - | Room description |
 | `USERNAME` | For public | - | Your username |
-| `TOKEN` | For public | - | Your token |
+| `TOKEN` | For public | - | Your token (UUID) |
 | `WEB_API_URL` | For public | - | API URL |
-| `PREFERRED_GAME` | No | Any Game | Game name |
-| `PREFERRED_GAME_ID` | No | 0 | Game ID (hex) |
-| `MAX_MEMBERS` | No | 16 | Max players |
+| `PREFERRED_GAME_ID` | No | 0 | Game ID (hex, e.g., 01006A800016E000) |
+| `MAX_MEMBERS` | No | 16 | Max players (2-254) |
 | `PASSWORD` | No | - | Room password |
-| `ENABLE_CITRON_MODS` | No | false | Allow mods |
+| `BIND_ADDRESS` | No | 0.0.0.0 | Bind IP address |
+| `PORT` | No | 24872 | Server port |
+| `ENABLE_CITRON_MODS` | No | false | Allow moderators |
+
+**Note**: `ROOM_NAME` and `PREFERRED_GAME` are required by Citron. Server will fail to start without them.
 
 ## Docker Compose
 
@@ -50,6 +69,7 @@ services:
       - "24872:24872/udp"
     environment:
       ROOM_NAME: "My Server"
+      PREFERRED_GAME: "Super Smash Bros"
       USERNAME: "your_username"
       TOKEN: "your-token"
       WEB_API_URL: "https://api.ynet-fun.xyz"
@@ -63,14 +83,7 @@ services:
 
 This image fixes **5 critical bugs** in vanilla Citron that cause instant crashes with public room credentials.
 
-**📋 See [PATCHES.md](PATCHES.md) for complete technical analysis and upstream patch details.**
-
-## Common Game IDs
-
-- Super Smash Bros. Ultimate: `01006A800016E000`
-- Mario Kart 8 Deluxe: `0100152000022000`
-- Splatoon 2: `01003BC0000A0000`
-- Animal Crossing: `01006F8002326000`
+**📋 See [PATCHES.md](PATCHES.md) for complete technical analysis.**
 
 ## Building
 
@@ -79,9 +92,6 @@ git clone https://github.com/Crunch41/citron-room-docker.git
 cd citron-room-docker
 docker build -t citron-room-server .
 ```
-
-**Image Size**: ~380MB  
-**Auto-builds**: Daily when citron-room source files change
 
 ## For Citron Developers
 
