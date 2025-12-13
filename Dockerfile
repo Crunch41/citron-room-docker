@@ -273,6 +273,46 @@ else:
     print("WARNING: Could not apply moderator logging patch")
 PY
 
+# ---------------------------------------------------------------------------
+# PATCH 7: Fix LAN moderator detection (check nickname when JWT fails)
+# ---------------------------------------------------------------------------
+RUN python3 - <<'PY'
+from pathlib import Path
+import re
+
+p = Path("src/network/room.cpp")
+content = p.read_text(encoding="utf-8")
+
+# Find the HasModPermission function and modify it to also check nickname
+# Original checks only user_data.username (from JWT)
+# We need to also check member.nickname (always available, even on LAN)
+
+pattern = re.compile(
+    r'(bool Room::RoomImpl::HasModPermission\(ENetPeer\* client\) const \{.*?'
+    r'if \(!room_information\.host_username\.empty\(\) &&\s+'
+    r'sending_member->user_data\.username == room_information\.host_username\) \{\s+'
+    r'return true;\s+'
+    r'\})',
+    re.DOTALL | re.MULTILINE
+)
+
+replacement = r'''\1
+    
+    // Also check nickname for LAN connections (when JWT verification fails)
+    if (!room_information.host_username.empty() &&
+        sending_member->nickname == room_information.host_username) {
+        return true;
+    }'''
+
+new_content = pattern.sub(replacement, content)
+
+if new_content != content:
+    p.write_text(new_content, encoding="utf-8")
+    print("✓ Added LAN moderator detection (nickname check)")
+else:
+    print("WARNING: Could not apply LAN moderator patch")
+PY
+
 # Configure - RELEASE BUILD (optimized, no debug symbols)
 RUN cmake -S . -B build \
       -G Ninja \
