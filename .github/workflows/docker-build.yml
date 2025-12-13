@@ -132,13 +132,17 @@ jobs:
           git push
 
       - name: Notify Discord (optional)
-        if: steps.final_check.outputs.should_build == 'true' && secrets.DISCORD_WEBHOOK_URL != ''
+        if: steps.final_check.outputs.should_build == 'true'
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
-          COMMIT="${{ steps.citron.outputs.short_commit }}"
-          WEBHOOK_URL="${{ secrets.DISCORD_WEBHOOK_URL }}"
-
-          MESSAGE="✅ New Citron Room Server built from commit ${COMMIT} (citron-room files changed)"
-
-          curl -X POST "$WEBHOOK_URL" \
-            -H "Content-Type: application/json" \
-            -d "{\"content\": \"${MESSAGE}\"}" || true
+          if [ -n "$DISCORD_WEBHOOK_URL" ]; then
+            COMMIT="${{ steps.citron.outputs.short_commit }}"
+            MESSAGE="✅ New Citron Room Server built from commit ${COMMIT} (citron-room files changed)"
+            
+            curl -X POST "$DISCORD_WEBHOOK_URL" \
+              -H "Content-Type: application/json" \
+              -d "{\"content\": \"${MESSAGE}\"}" || true
+          else
+            echo "Discord webhook not configured, skipping notification"
+          fi
