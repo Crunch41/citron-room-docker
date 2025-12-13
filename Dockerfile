@@ -278,39 +278,41 @@ PY
 # ---------------------------------------------------------------------------
 RUN python3 - <<'PY'
 from pathlib import Path
-import re
 
 p = Path("src/network/room.cpp")
 content = p.read_text(encoding="utf-8")
 
-# Find the HasModPermission function and modify it to also check nickname
-# Original checks only user_data.username (from JWT)
-# We need to also check member.nickname (always available, even on LAN)
+# Look for the specific pattern in HasModPermission function
+# We want to add nickname check after the username check
+search_string = """if (!room_information.host_username.empty() &&
+        sending_member->user_data.username == room_information.host_username) { // Room host
 
-pattern = re.compile(
-    r'(bool Room::RoomImpl::HasModPermission\(ENetPeer\* client\) const \{.*?'
-    r'if \(!room_information\.host_username\.empty\(\) &&\s+'
-    r'sending_member->user_data\.username == room_information\.host_username\) \{\s+'
-    r'return true;\s+'
-    r'\})',
-    re.DOTALL | re.MULTILINE
-)
+        return true;
+    }"""
 
-replacement = r'''\1
-    
+replacement_string = """if (!room_information.host_username.empty() &&
+        sending_member->user_data.username == room_information.host_username) { // Room host
+
+        return true;
+    }
     // Also check nickname for LAN connections (when JWT verification fails)
     if (!room_information.host_username.empty() &&
-        sending_member->nickname == room_information.host_username) {
+        sending_member->nickname == room_information.host_username) { // Room host (LAN)
+
         return true;
-    }'''
+    }"""
 
-new_content = pattern.sub(replacement, content)
-
-if new_content != content:
-    p.write_text(new_content, encoding="utf-8")
+if search_string in content:
+    content = content.replace(search_string, replacement_string)
+    p.write_text(content, encoding="utf-8")
     print("✓ Added LAN moderator detection (nickname check)")
 else:
-    print("WARNING: Could not apply LAN moderator patch")
+    print("WARNING: Could not find HasModPermission pattern")
+    # Try to print what we can find for debugging
+    if "HasModPermission" in content:
+        print("INFO: HasModPermission function exists in file")
+    if "room_information.host_username" in content:
+        print("INFO: host_username check exists in file")
 PY
 
 # Configure - RELEASE BUILD (optimized, no debug symbols)
