@@ -16,10 +16,16 @@ on:
 jobs:
   check-and-build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Allow pushing .last_citron_commit
+      packages: write
 
     steps:
       - name: Checkout this repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: true
 
       - name: Get latest Citron commit
         id: citron
