@@ -79,6 +79,46 @@ services:
     restart: unless-stopped
 ```
 
+## Persistent Data
+
+### Volume Mounting
+
+**Required for**:
+- ✅ Ban list persistence across restarts
+- ✅ Log file persistence across restarts
+
+```bash
+-v /mnt/cache/appdata/citron-room:/home/citron/.local/share/citron-room
+```
+
+**Without volume mount**:
+- ⚠️ Ban list resets on container restart
+- ⚠️ Logs are lost on container restart
+
+### Ban List Format
+
+File: `/home/citron/.local/share/citron-room/ban_list.txt`
+
+```
+CitronRoom-BanList-1
+BadUsername1
+BadUsername2
+
+192.168.1.100
+10.0.0.50
+```
+
+**Structure**:
+- Line 1: Magic header (required)
+- Username bans (one per line)
+- Empty line separator
+- IP bans (one per line)
+
+### Logs
+
+- **Console**: `docker logs <container-name>`
+- **File**: `/home/citron/.local/share/citron-room/citron-room.log` (requires volume)
+
 ## Bug Fixes Included
 
 This image fixes **5 critical bugs** in vanilla Citron that cause instant crashes with public room credentials.
