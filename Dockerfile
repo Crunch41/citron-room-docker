@@ -248,6 +248,31 @@ else:
     print("WARNING: Could not find username argument")
 PY
 
+# ---------------------------------------------------------------------------
+# PATCH 6: Add moderator join logging
+# ---------------------------------------------------------------------------
+RUN python3 - <<'PY'
+from pathlib import Path
+import re
+
+p = Path("src/network/room.cpp")
+content = p.read_text(encoding="utf-8")
+
+# Find the HasModPermission check and add logging
+# Look for the pattern where SendJoinSuccessAsMod is called
+pattern = r'(if \(HasModPermission\(event->peer\)\) \{\s+)(SendJoinSuccessAsMod\(event->peer, preferred_fake_ip\);)'
+
+replacement = r'\1LOG_INFO(Network, "User \'{}\' ({}) joined as MODERATOR", member.nickname, member.user_data.username);\n        \2'
+
+new_content = re.sub(pattern, replacement, content, flags=re.MULTILINE)
+
+if new_content != content:
+    p.write_text(new_content, encoding="utf-8")
+    print("✓ Added moderator join logging")
+else:
+    print("WARNING: Could not apply moderator logging patch")
+PY
+
 # Configure - RELEASE BUILD (optimized, no debug symbols)
 RUN cmake -S . -B build \
       -G Ninja \
