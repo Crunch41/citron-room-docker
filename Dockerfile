@@ -330,6 +330,42 @@ else:
         print("INFO: host_username check exists in file")
 PY
 
+# ---------------------------------------------------------------------------
+# PATCH 8: Replace JWT error with LAN-friendly message
+# ---------------------------------------------------------------------------
+RUN python3 - <<'PY'
+from pathlib import Path
+
+p = Path("src/web_service/verify_user_jwt.cpp")
+content = p.read_text(encoding="utf-8")
+
+# Replace the error log with a more friendly message
+# Check if it's error code 2 (signature format) which is common for LAN
+search_string = '''if (error) {
+        LOG_INFO(WebService, "Verification failed: category={}, code={}, message={}",
+                 error.category().name(), error.value(), error.message());
+        return {};
+    }'''
+
+replacement_string = '''if (error) {
+        // For error code 2 (signature format), this is normal for LAN connections
+        if (error.value() == 2) {
+            LOG_INFO(WebService, "LAN connection detected (JWT verification skipped)");
+        } else {
+            LOG_INFO(WebService, "Verification failed: category={}, code={}, message={}",
+                     error.category().name(), error.value(), error.message());
+        }
+        return {};
+    }'''
+
+if search_string in content:
+    content = content.replace(search_string, replacement_string)
+    p.write_text(content, encoding="utf-8")
+    print("✓ Added friendly LAN connection message")
+else:
+    print("WARNING: Could not find JWT verification error pattern")
+PY
+
 # Configure - RELEASE BUILD (optimized, no debug symbols)
 RUN cmake -S . -B build \
       -G Ninja \
