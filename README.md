@@ -121,7 +121,7 @@ BadUsername2
 
 ## Bug Fixes Included
 
-This image fixes **7 critical bugs** in vanilla Citron:
+This image fixes **8 critical bugs** in vanilla Citron:
 
 1. ✅ **Container hanging** - Fixed stdin blocking loop
 2. ✅ **Public room crash** - Fixed missing `lobby_api_url` initialization
@@ -130,6 +130,7 @@ This image fixes **7 critical bugs** in vanilla Citron:
 5. ✅ **Thread crashes** - Added safety wrapper to announcement loop
 6. ✅ **Moderator logging** - Shows when users join with mod privileges
 7. ✅ **LAN moderator detection** - Enables mod powers on local connections
+8. ✅ **Confusing JWT errors** - Friendly "LAN connection detected" message
 
 ### Moderator Features
 
