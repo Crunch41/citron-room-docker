@@ -121,7 +121,27 @@ BadUsername2
 
 ## Bug Fixes Included
 
-This image fixes **5 critical bugs** in vanilla Citron that cause instant crashes with public room credentials.
+This image fixes **7 critical bugs** in vanilla Citron:
+
+1. ✅ **Container hanging** - Fixed stdin blocking loop
+2. ✅ **Public room crash** - Fixed missing `lobby_api_url` initialization
+3. ✅ **Username segfault** - Fixed NULL crash with username argument
+4. ✅ **JSON errors** - Added error handling to `Register()`
+5. ✅ **Thread crashes** - Added safety wrapper to announcement loop
+6. ✅ **Moderator logging** - Shows when users join with mod privileges
+7. ✅ **LAN moderator detection** - Enables mod powers on local connections
+
+### Moderator Features
+
+**Server Owner Privileges**:
+- Set `USERNAME` to your Citron username
+- You'll automatically get moderator powers
+- Works on LAN even when JWT verification fails
+
+**Moderator Join Logs**:
+```
+[Network] User 'YourName' (YourName) joined as MODERATOR
+```
 
 **📋 See [PATCHES.md](PATCHES.md) for complete technical analysis.**
 
