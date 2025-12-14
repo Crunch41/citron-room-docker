@@ -1,47 +1,286 @@
-# Citron Room Server - Complete Source Code Patch Analysis
+# Citron Room Server - Complete Patch Analysis
 
-**Document Version**: 3.0  
-**Citron Upstream**: `git.citron-emu.org/Citron/Emulator.git` (branch: main)  
-**Date**: December 14, 2025
+All patches applied to fix critical bugs in vanilla Citron dedicated room server.
 
-## Executive Summary
+## Overview
 
-This document provides a comprehensive analysis of all source code modifications applied to the vanilla Citron Emulator to create the `citron-room-docker` server. All patches are applied during Docker build via Python scripts.
-
-**Total Patches**: 8 (5 critical fixes + 3 enhancements)  
-**Files Modified**: 4 source files  
-**Lines Changed**: ~90 lines total
+**Total Patches**: 8  
+**Image Size**: ~380MB (compressed ~130MB)  
+**Build Type**: Release (optimized, stripped)  
+**Status**: ✅ Production Ready
 
 ---
 
-## 📋 Patch Overview
+## Patch #1: Stdin Loop Fix
 
-| # | File | Lines | Issue | Severity |
-|---|------|-------|-------|----------|
-| 1 | `citron_room.cpp` | 382-389 | Stdin blocking | Medium |
-| 2 | `citron_room.cpp` | 329,336 | Missing lobby_api_url | **CRITICAL** |
-| 3 | `announce_room_json.cpp` | 115-118 | No JSON error handling | High |
-| 4 | `announce_multiplayer_session.cpp` | 103-145 | Thread crash | High |
-| 5 | `citron_room.cpp` | 214 | Username NULL crash | **CRITICAL** |
-| 6 | `room.cpp` | 394-405 | No moderator logging | Low |
-| 7 | `room.cpp` | 581-587 | LAN moderator detection | **CRITICAL** |
-| 8 | `verify_user_jwt.cpp` | 47-54 | Confusing JWT error | Low |
+**Purpose**: Prevent container from hanging waiting for console input
+
+**File**: `src/dedicated_room/citron_room.cpp`
+
+**Before**:
+```cpp
+while (room->GetState() == Network::Room::State::Open) {
+    std::string in;
+    std::cin >> in;  // ← BLOCKS waiting for input
+    if (in.size() > 0) {
+        break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+}
+```
+
+**After**:
+```cpp
+while (room->GetState() == Network::Room::State::Open) {
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+}
+```
+
+**Why Needed**: Docker containers don't have interactive stdin, causing the original loop to hang.
 
 ---
 
-## PATCH 1-7: [Previous Content]
+## Patch #2: lobby_api_url Fix ⭐ CRITICAL
 
-_(See previous sections for patches 1-7)_
+**Purpose**: Fix NULL crash when announcing public rooms
+
+**File**: `src/dedicated_room/citron_room.cpp`
+
+**Before**:
+```cpp
+Settings::values.web_api_url = web_api_url;
+// lobby_api_url NEVER SET!
+```
+
+**After**:
+```cpp
+Settings::values.web_api_url = web_api_url;
+Settings::values.lobby_api_url = Settings::values.web_api_url.GetValue();
+```
+
+**Why Needed**: `AnnounceMultiplayerSession` reads `lobby_api_url.GetValue()` to initialize backend. Without this, it gets an empty string, causing connection errors or crashes.
+
+**GDB Stack Trace**:
+```
+#0  strlen () at /lib/x86_64-linux-gnu/libc.so.6
+#1  std::char_traits<char>::length () at /usr/include/c++/13/bits/char_traits.h
+#2  std::__cxx11::basic_string<char>::assign () at string
+#3  Network::AnnounceMultiplayerSession::AnnounceMultiplayerSession()
+```
 
 ---
 
-## PATCH 8: Friendly LAN Connection Message
+## Patch #3: Register() Error Handling
 
-### 📍 Location
-**File**: `src/web_service/verify_user_jwt.cpp`  
-**Lines**: 47-54
+**Purpose**: Gracefully handle JSON parsing errors
 
-### ❌ Vanilla Code (CONFUSING)
+**File**: `src/web_service/announce_room_json.cpp`
+
+**Before**:
+```cpp
+auto reply_json = nlohmann::json::parse(result.returned_data);  // Can throw!
+room = reply_json.get<AnnounceMultiplayerRoom::Room>();         // Can throw!
+room_id = reply_json.at("id").get<std::string>();               // Can throw!
+```
+
+**After**:
+```cpp
+try {
+    if (result.returned_data.empty()) {
+        LOG_ERROR(WebService, "Registration response is empty");
+        return WebService::WebResult{WebService::WebResult::Code::WrongContent, 
+                                     "Empty response from server", ""};
+    }
+    
+    auto reply_json = nlohmann::json::parse(result.returned_data);
+    
+    if (!reply_json.contains("id")) {
+        LOG_ERROR(WebService, "Registration response missing 'id' field");
+        return WebService::WebResult{WebService::WebResult::Code::WrongContent, 
+                                     "Missing room ID in response", ""};
+    }
+    
+    room = reply_json.get<AnnounceMultiplayerRoom::Room>();
+    room_id = reply_json.at("id").get<std::string>();
+    result.returned_data = room_id;
+    
+} catch (const std::exception& e) {
+    LOG_ERROR(WebService, "Registration parsing error: {}", e.what());
+    return WebService::WebResult{WebService::WebResult::Code::WrongContent, 
+                                 "Invalid JSON in response", ""};
+}
+```
+
+**Why Needed**: Malformed API responses would crash the server. Now errors are logged and handled gracefully.
+
+---
+
+## Patch #4: Thread Safety Wrapper
+
+**Purpose**: Prevent silent crashes in announcement thread
+
+**File**: `src/network/announce_multiplayer_session.cpp`
+
+**Before**:
+```cpp
+void AnnounceMultiplayerSession::AnnounceMultiplayerLoop() {
+    // Entire function body...
+    // Any uncaught exception terminates entire process!
+}
+```
+
+**After**:
+```cpp
+void AnnounceMultiplayerSession::AnnounceMultiplayerLoop() {
+    try {
+        // Entire function body...
+    } catch (const std::exception& e) {
+        LOG_ERROR(Network, "Announce thread crashed: {}", e.what());
+    } catch (...) {
+        LOG_ERROR(Network, "Announce thread crashed (unknown)");
+    }
+}
+```
+
+**Why Needed**: Background threads that throw exceptions call `std::terminate()`, crashing the entire server with no logs.
+
+---
+
+## Patch #5: Username NULL Crash ⭐ CRITICAL
+
+**Purpose**: Fix instant segfault with `--username` argument
+
+**File**: `src/dedicated_room/citron_room.cpp`
+
+**Before**:
+```cpp
+{"username", optional_argument, 0, 'u'}
+```
+
+**After**:
+```cpp
+{"username", required_argument, 0, 'u'}
+```
+
+**Context**:
+```cpp
+case 'u':
+    username.assign(optarg);  // ← CRASHES if optarg is NULL
+    break;
+```
+
+**Why Needed**: When `--username "value"` is passed with a space, `getopt_long` with `optional_argument` sets `optarg` to NULL. This causes `strlen(NULL)` → instant segfault.
+
+**GDB Stack Trace**:
+```
+#0  strlen () at /lib/x86_64-linux-gnu/libc.so.6
+#1  std::char_traits<char>::length ()
+#2  std::__cxx11::basic_string<char>::assign (optarg)
+#3  main () at citron_room.cpp:257
+```
+
+---
+
+## Patch #6: Moderator Join Logging
+
+**Purpose**: Log when users join with moderator privileges
+
+**File**: `src/network/room.cpp`
+
+**Before**:
+```cpp
+if (HasModPermission(event->peer)) {
+    SendJoinSuccessAsMod(event->peer, preferred_fake_ip);
+} else {
+    SendJoinSuccess(event->peer, preferred_fake_ip);
+}
+```
+
+**After**:
+```cpp
+if (HasModPermission(event->peer)) {
+    // Log moderator join (lookup from members list since member was moved)
+    std::lock_guard lock(member_mutex);
+    const auto mod_member = std::find_if(members.begin(), members.end(),
+        [&event](const auto& m) { return m.peer == event->peer; });
+    if (mod_member != members.end()) {
+        LOG_INFO(Network, "User '{}' ({}) joined as MODERATOR", 
+                 mod_member->nickname, mod_member->user_data.username);
+    }
+    SendJoinSuccessAsMod(event->peer, preferred_fake_ip);
+} else {
+    SendJoinSuccess(event->peer, preferred_fake_ip);
+}
+```
+
+**Why Needed**: Server owners need to verify moderator status is working correctly.
+
+**Output**:
+```
+[Network] User 'Crunch41' (Crunch41) joined as MODERATOR
+```
+
+---
+
+## Patch #7: LAN Moderator Detection ⭐ CRITICAL
+
+**Purpose**: Enable moderator permissions on LAN when JWT verification fails
+
+**File**: `src/network/room.cpp`
+
+**Before**:
+```cpp
+bool HasModPermission(ENetPeer* client) const {
+    // Only checks user_data.username (from JWT)
+    if (!room_information.host_username.empty() &&
+        sending_member->user_data.username == room_information.host_username) {
+        return true;
+    }
+    return false;
+}
+```
+
+**After**:
+```cpp
+bool HasModPermission(ENetPeer* client) const {
+    // Check JWT username (for internet play)
+    if (!room_information.host_username.empty() &&
+        sending_member->user_data.username == room_information.host_username) {
+        return true;
+    }
+    
+    // Also check nickname for LAN connections (when JWT verification fails)
+    if (!room_information.host_username.empty() &&
+        sending_member->nickname == room_information.host_username) {
+        return true;
+    }
+    
+    return false;
+}
+```
+
+**Why Needed**: 
+- LAN connections always fail JWT verification: `Verification failed: signature format is incorrect`
+- When JWT fails, `user_data.username` is empty
+- `nickname` is always populated, even on LAN
+- Without this patch, server owners can't moderate their own LAN servers
+
+**Expected Logs**:
+```
+[WebService] Verification failed: category=decode, code=2, message=signature format is incorrect
+[Network] [192.168.10.20] Crunch41 has joined.
+[Network] User 'Crunch41' (Crunch41) joined as MODERATOR  ← Now works!
+```
+
+---
+
+## Patch #8: Friendly LAN Message
+
+**Purpose**: Replace confusing JWT error with user-friendly message
+
+**File**: `src/web_service/verify_user_jwt.cpp`
+
+**Before**:
 ```cpp
 if (error) {
     LOG_INFO(WebService, "Verification failed: category={}, code={}, message={}",
@@ -55,7 +294,7 @@ if (error) {
 [WebService] Verification failed: category=decode, code=2, message=signature format is incorrect
 ```
 
-### ✅ Patched Code (FRIENDLY)
+**After**:
 ```cpp
 if (error) {
     // For error code 2 (signature format), this is normal for LAN connections
@@ -74,19 +313,11 @@ if (error) {
 [WebService] LAN connection detected (JWT verification skipped)
 ```
 
-### 🔍 Why This Fix is Needed
-
-**Problem**:
-- LAN connections always fail JWT verification with error code 2
-- Error message "Verification failed: signature format is incorrect" is confusing
-- Users think something is broken when it's actually working fine
-
-**Solution**:
-- Detect error code 2 specifically
-- Show friendly message indicating LAN mode
-- Still log detailed errors for other JWT failures
-
-**Impact**: Much cleaner logs for LAN users, no confusion about "failed" verification.
+**Why Needed**: 
+- Error code 2 (signature format) always appears on LAN
+- Users think something is broken when seeing "failed"
+- Real JWT errors still show detailed message
+- Much clearer UX for local play
 
 ---
 
@@ -96,8 +327,8 @@ if (error) {
 |-------|------|----------|-------|
 | #1 | citron_room.cpp | Medium | Container hanging |
 | #2 | citron_room.cpp | **CRITICAL** | NULL crash on public rooms |
-| #3 | announce_room_json.cpp | High | JSON parsing crashes |
-| #4 | announce_multiplayer_session.cpp | High | Silent thread crashes |
+| #3 | announce_room_json.cpp | Medium | JSON parsing crashes |
+| #4 | announce_multiplayer_session.cpp | Medium | Silent thread crashes |
 | #5 | citron_room.cpp | **CRITICAL** | Instant segfault with username |
 | #6 | room.cpp | Low | Moderator visibility |
 | #7 | room.cpp | **CRITICAL** | LAN moderator permissions |
@@ -105,27 +336,43 @@ if (error) {
 
 ---
 
-## Complete Log Output (After All Patches)
+## Final Log Output
 
+**With all 8 patches applied**:
 ```
 [Network] Room is open. Close with Q+Enter...
 [WebService] Room has been registered
 [WebService] LAN connection detected (JWT verification skipped)
 [Network] [192.168.10.20] Crunch41 has joined.
 [Network] User 'Crunch41' (Crunch41) joined as MODERATOR
-[Network] Crunch41 is not playing
 ```
 
-Clean, informative, and no confusing errors! ✨
+Clean, informative, no confusing errors! ✨
 
 ---
 
-## Conclusion
+## Verification
 
-These 8 patches transform the Citron dedicated room server from **completely broken** to **production-ready** with **excellent UX**.
+**All patches applied successfully**:
+```
+✓ Patched stdin loop
+✓ Fixed lobby_api_url (2 locations)
+✓ Added Register() error handling
+✓ Added thread safety wrapper
+✓ Fixed username argument (required)
+✓ Added moderator join logging with correct member lookup
+✓ Added LAN moderator detection (nickname check)
+✓ Added friendly LAN connection message
+```
 
-**Critical Patches** (#2, #5, #7) fix instant crashes and enable core functionality  
-**High-Priority Patches** (#3, #4) fix reliability issues  
-**Enhancement Patches** (#1, #6, #8) improve stability and user experience
+**Build Configuration**:
+- CMake: Release build type
+- Binary: Stripped
+- No debug tools in production image
+- Final size: ~380MB uncompressed, ~130MB compressed
 
-**All patches verified working in production** as of December 14, 2025.
+---
+
+## For Citron Developers
+
+All 8 patches are production-ready and can be submitted upstream to fix these critical issues in the vanilla Citron Room Server.
