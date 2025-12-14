@@ -258,17 +258,32 @@ import re
 p = Path("src/network/room.cpp")
 content = p.read_text(encoding="utf-8")
 
-# Find the HasModPermission check and add logging
-# Look for the pattern where SendJoinSuccessAsMod is called
-pattern = r'(if \(HasModPermission\(event->peer\)\) \{\s+)(SendJoinSuccessAsMod\(event->peer, preferred_fake_ip\);)'
+# Find where we send join success and add logging
+# We need to log BEFORE member is moved, so we'll look up from members list
+search_pattern = """if (HasModPermission(event->peer)) {
+        SendJoinSuccessAsMod(event->peer, preferred_fake_ip);
+    } else {
+        SendJoinSuccess(event->peer, preferred_fake_ip);
+    }"""
 
-replacement = r'\1LOG_INFO(Network, "User \'{}\' ({}) joined as MODERATOR", member.nickname, member.user_data.username);\n        \2'
+replacement = """if (HasModPermission(event->peer)) {
+        // Log moderator join (lookup from members list since member was moved)
+        std::lock_guard lock(member_mutex);
+        const auto mod_member = std::find_if(members.begin(), members.end(),
+            [&event](const auto& m) { return m.peer == event->peer; });
+        if (mod_member != members.end()) {
+            LOG_INFO(Network, "User '{}' ({}) joined as MODERATOR", 
+                     mod_member->nickname, mod_member->user_data.username);
+        }
+        SendJoinSuccessAsMod(event->peer, preferred_fake_ip);
+    } else {
+        SendJoinSuccess(event->peer, preferred_fake_ip);
+    }"""
 
-new_content = re.sub(pattern, replacement, content, flags=re.MULTILINE)
-
-if new_content != content:
-    p.write_text(new_content, encoding="utf-8")
-    print("✓ Added moderator join logging")
+if search_pattern in content:
+    content = content.replace(search_pattern, replacement)
+    p.write_text(content, encoding="utf-8")
+    print("✓ Added moderator join logging with correct member lookup")
 else:
     print("WARNING: Could not apply moderator logging patch")
 PY
