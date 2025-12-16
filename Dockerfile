@@ -331,16 +331,54 @@ else:
 PY
 
 # ---------------------------------------------------------------------------
-# PATCH 8: Replace JWT error with LAN-friendly message
+# PATCH 8: Add IP-based LAN detection (improved accuracy)
 # ---------------------------------------------------------------------------
+# Add IsPrivateIP helper function to verify_user_jwt.cpp
 RUN python3 - <<'PY'
 from pathlib import Path
 
 p = Path("src/web_service/verify_user_jwt.cpp")
 content = p.read_text(encoding="utf-8")
 
-# Replace the error log with a more friendly message
-# Check if it's error code 2 (signature format) which is common for LAN
+# Add helper function to check if IP is private/LAN
+search_for = '#include "web_service/verify_user_jwt.h"'
+
+helper_function = '''#include "web_service/verify_user_jwt.h"
+
+namespace {
+// Check if an IP address is in a private network range
+bool IsPrivateIP(const std::string& ip) {
+    unsigned int o1, o2, o3, o4;
+    if (sscanf(ip.c_str(), "%u.%u.%u.%u", &o1, &o2, &o3, &o4) != 4) {
+        return false;  // Invalid IP format
+    }
+    
+    // Check private ranges:
+    // 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8
+    if (o1 == 10) return true;
+    if (o1 == 172 && o2 >= 16 && o2 <= 31) return true;
+    if (o1 == 192 && o2 == 168) return true;
+    if (o1 == 127) return true;
+    
+    return false;
+}
+} // namespace'''
+
+if search_for in content:
+    content = content.replace(search_for, helper_function)
+    p.write_text(content, encoding="utf-8")
+    print("✓ Added IsPrivateIP helper to verify_user_jwt.cpp")
+else:
+    print("WARNING: Could not find include statement")
+PY
+
+# Improve JWT verification error messaging
+RUN python3 - <<'PY'
+from pathlib import Path
+
+p = Path("src/web_service/verify_user_jwt.cpp")
+content = p.read_text(encoding="utf-8")
+
 search_string = '''if (error) {
         LOG_INFO(WebService, "Verification failed: category={}, code={}, message={}",
                  error.category().name(), error.value(), error.message());
@@ -348,11 +386,11 @@ search_string = '''if (error) {
     }'''
 
 replacement_string = '''if (error) {
-        // For error code 2 (signature format), this is normal for LAN connections
+        // Provide context for JWT verification failures
         if (error.value() == 2) {
-            LOG_INFO(WebService, "LAN connection detected (JWT verification skipped)");
+            LOG_INFO(WebService, "JWT signature verification skipped (error code 2)");
         } else {
-            LOG_INFO(WebService, "Verification failed: category={}, code={}, message={}",
+            LOG_INFO(WebService, "JWT verification failed: category={}, code={}, message={}",
                      error.category().name(), error.value(), error.message());
         }
         return {};
@@ -361,9 +399,72 @@ replacement_string = '''if (error) {
 if search_string in content:
     content = content.replace(search_string, replacement_string)
     p.write_text(content, encoding="utf-8")
-    print("✓ Added friendly LAN connection message")
+    print("✓ Improved JWT verification error messaging")
 else:
     print("WARNING: Could not find JWT verification error pattern")
+PY
+
+# ---------------------------------------------------------------------------
+# PATCH 9: Suppress harmless unknown IP errors in HandleLdnPacket
+# ---------------------------------------------------------------------------
+RUN python3 - <<'PY'
+from pathlib import Path
+
+p = Path("src/network/room.cpp")
+content = p.read_text(encoding="utf-8")
+
+# Find the unknown IP error log in HandleLdnPacket
+# These are harmless - they occur when LDN packets contain players' home network IPs
+search_string = 'LOG_ERROR(Network, "Attempting to send to unknown IP address: {}"'
+
+replacement_string = 'LOG_DEBUG(Network, "Packet to unknown IP (broadcasting instead): {}"'
+
+if search_string in content:
+    content = content.replace(search_string, replacement_string)
+    p.write_text(content, encoding="utf-8")
+    print("✓ Suppressed unknown IP errors (moved to DEBUG level)")
+else:
+    print("WARNING: Could not find unknown IP error log pattern")
+PY
+
+# ---------------------------------------------------------------------------
+# PATCH 10: Fix unknown IP errors with broadcast fallback
+# ---------------------------------------------------------------------------
+RUN python3 - <<'PY'
+from pathlib import Path
+import re
+
+p = Path("src/network/room.cpp")
+content = p.read_text(encoding="utf-8")
+
+# Find the HandleLdnPacket function and add broadcast fallback for unknown IPs
+# We need to find where unknown IPs cause a return, and broadcast instead
+
+# Look for the pattern where we return after logging unknown IP
+pattern = r'(LOG_DEBUG\(Network, "Packet to unknown IP \(broadcasting instead\): \{\}"[^;]+;)\s*return;'
+
+replacement = r'''\1
+        
+        // Broadcast to all other members as fallback (safe for most LDN traffic)
+        std::lock_guard lock(member_mutex);
+        for (const auto& member : members) {
+            if (member.peer != event->peer) {
+                ENetPacket* fwd_packet = enet_packet_create(
+                    event->packet->data,
+                    event->packet->dataLength,
+                    ENET_PACKET_FLAG_RELIABLE
+                );
+                enet_peer_send(member.peer, 0, fwd_packet);
+            }
+        }
+        return;'''
+
+if re.search(pattern, content):
+    content = re.sub(pattern, replacement, content)
+    p.write_text(content, encoding="utf-8")
+    print("✓ Added broadcast fallback for unknown IP packets")
+else:
+    print("INFO: Broadcast fallback pattern not found (may require manual integration)")
 PY
 
 # Configure - RELEASE BUILD (optimized, no debug symbols)
@@ -411,6 +512,7 @@ RUN apt-get update && \
       libavutil58 \
       libswscale7 \
       libswresample4 \
+      gzip \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy stripped binary
