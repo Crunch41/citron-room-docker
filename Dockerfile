@@ -46,7 +46,7 @@ RUN apt-get update && \
       libmbedtls-dev \
       # Optional dependencies (suppress CMake warnings)
       libusb-1.0-0-dev \
-      libgamemode-dev \
+      gamemode-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
