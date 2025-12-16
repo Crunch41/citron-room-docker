@@ -274,9 +274,9 @@ bool HasModPermission(ENetPeer* client) const {
 
 ---
 
-## Patch #8: IP-Based LAN Detection (Improved)
+## Patch #8: Improved JWT Error Messaging
 
-**Purpose**: Accurately detect LAN connections by checking source IP address
+**Purpose**: Provide clearer error messages for JWT verification failures
 
 **File**: `src/web_service/verify_user_jwt.cpp`
 
@@ -291,23 +291,8 @@ if (error) {
 
 **After**:
 ```cpp
-// Added IsPrivateIP() helper function
-namespace {
-bool IsPrivateIP(const std::string& ip) {
-    unsigned int o1, o2, o3, o4;
-    if (sscanf(ip.c_str(), "%u.%u.%u.%u", &o1, &o2, &o3, &o4) != 4) {
-        return false;
-    }
-    // Check: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8
-    if (o1 == 10) return true;
-    if (o1 == 172 && o2 >= 16 && o2 <= 31) return true;
-    if (o1 == 192 && o2 == 168) return true;
-    if (o1 == 127) return true;
-    return false;
-}
-}
-
 if (error) {
+    // Provide context for JWT verification failures
     if (error.value() == 2) {
         LOG_INFO(WebService, "JWT signature verification skipped (error code 2)");
     } else {
@@ -319,18 +304,16 @@ if (error) {
 ```
 
 **Why Needed**:
-- **Old approach**: Detected "LAN" based on JWT error code 2 (signature format)
-- **Problem**: Remote internet users with bad/missing JWTs were marked as "LAN" ❌
-- **New approach**: `IsPrivateIP()` checks if source IP is actually in private ranges
-- **Result**: Accurate distinction between LAN (192.168.x.x, 10.x.x.x) and remote connections ✅
+- Error code 2 (signature format) is very common for LAN connections
+- Original message was confusing - users thought something was broken
+- New message clarifies this is expected behavior for error code 2
+- Other JWT errors still show detailed diagnostic information
 
 **Output Changes**:
 ```
-OLD: [WebService] LAN connection detected (JWT verification skipped)
-     [Network] [117.74.114.226] Player has joined.  ← Public IP marked as "LAN"! ❌
+OLD: [WebService] Verification failed: category=decode, code=2, message=signature format is incorrect
 
 NEW: [WebService] JWT signature verification skipped (error code 2)
-     [Network] [117.74.114.226] Player has joined.  ← Correctly identified as remote ✅
 ```
 
 ---
@@ -435,7 +418,7 @@ if (dest_member == nullptr) {
 | #5 | citron_room.cpp | **CRITICAL** | Instant segfault with username |
 | #6 | room.cpp | Low | Moderator visibility |
 | #7 | room.cpp | **CRITICAL** | LAN moderator permissions |
-| #8 | verify_user_jwt.cpp | Medium | **IP-based LAN detection** |
+| #8 | verify_user_jwt.cpp | Low | **JWT error messaging** |
 | #9 | room.cpp | Low | **Unknown IP error spam** |
 | #10 | room.cpp | **CRITICAL** | **LDN packet loss fix** |
 

@@ -72,7 +72,7 @@ rotate_logs
     echo "  Max Members: $MAX_MEMBERS (max: 254)"
     echo "  Bind Address: $BIND_ADDRESS"
     echo "  Ban List: $BAN_LIST_FILE"
-    echo "  Log File: $LOG_FILE (rotate at ${MAX_LOG_SIZE}MB, keep ${MAX_LOG_FILES} files)"
+    echo "  Log File: $LOG_FILE (rotate at $((MAX_LOG_SIZE / 1024 / 1024))MB, keep ${MAX_LOG_FILES} files)"
     echo "  Network Version: 1"
     echo "  Mode: $MODE"
     echo "================================================================================"

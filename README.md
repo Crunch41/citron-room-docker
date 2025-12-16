@@ -149,7 +149,7 @@ This image includes **10 patches** fixing critical bugs and improving multiplaye
 7. ✅ **LAN moderator detection** - Enables mod powers on local connections
 
 **Network Improvements (Patches 8-10)**:
-8. ✅ **IP-based LAN detection** - Accurate LAN vs remote identification
+8. ✅ **JWT error messaging** - Clearer error messages for verification failures
 9. ✅ **Unknown IP error suppression** - Cleaner logs (moved to DEBUG)
 10. ✅ **LDN packet loss fix** - Broadcast fallback for unknown IPs
 
