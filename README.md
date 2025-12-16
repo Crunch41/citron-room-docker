@@ -119,10 +119,27 @@ BadUsername2
 - **Console**: `docker logs <container-name>`
 - **File**: `/home/citron/.local/share/citron-room/citron-room.log` (requires volume)
 
+**Logging Features** ✨:
+- ✅ **Automatic rotation** - Rotates at 10MB, keeps last 7 files
+- ✅ **Compression** - Old logs gzip compressed (saves space)
+- ✅ **Clean format** - ANSI color codes stripped from file
+- ✅ **ISO timestamps** - Each start includes ISO timestamp
+- ✅ **Persistent** - Survives container restarts
+
+**Log files**:
+```
+citron-room.log         # Current log (clean text)
+citron-room.log.1.gz    # Previous rotation (compressed)
+citron-room.log.2.gz    # 2nd rotation
+...
+citron-room.log.7.gz    # Oldest (auto-deleted when new rotation occurs)
+```
+
 ## Bug Fixes Included
 
-This image fixes **8 critical bugs** in vanilla Citron:
+This image includes **10 patches** fixing critical bugs and improving multiplayer:
 
+**Core Fixes (Patches 1-7)**:
 1. ✅ **Container hanging** - Fixed stdin blocking loop
 2. ✅ **Public room crash** - Fixed missing `lobby_api_url` initialization
 3. ✅ **Username segfault** - Fixed NULL crash with username argument
@@ -130,7 +147,11 @@ This image fixes **8 critical bugs** in vanilla Citron:
 5. ✅ **Thread crashes** - Added safety wrapper to announcement loop
 6. ✅ **Moderator logging** - Shows when users join with mod privileges
 7. ✅ **LAN moderator detection** - Enables mod powers on local connections
-8. ✅ **Confusing JWT errors** - Friendly "LAN connection detected" message
+
+**Network Improvements (Patches 8-10)**:
+8. ✅ **IP-based LAN detection** - Accurate LAN vs remote identification
+9. ✅ **Unknown IP error suppression** - Cleaner logs (moved to DEBUG)
+10. ✅ **LDN packet loss fix** - Broadcast fallback for unknown IPs
 
 ### Moderator Features
 
