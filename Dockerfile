@@ -334,48 +334,8 @@ else:
 PY
 
 # ---------------------------------------------------------------------------
-# PATCH 8: Add IP-based LAN detection (improved accuracy)
+# PATCH 8: Improve JWT verification error messaging
 # ---------------------------------------------------------------------------
-# Add IsPrivateIP helper function to verify_user_jwt.cpp
-RUN python3 - <<'PY'
-from pathlib import Path
-
-p = Path("src/web_service/verify_user_jwt.cpp")
-content = p.read_text(encoding="utf-8")
-
-# Add helper function to check if IP is private/LAN
-search_for = '#include "web_service/verify_user_jwt.h"'
-
-helper_function = '''#include "web_service/verify_user_jwt.h"
-
-namespace {
-// Check if an IP address is in a private network range
-bool IsPrivateIP(const std::string& ip) {
-    unsigned int o1, o2, o3, o4;
-    if (sscanf(ip.c_str(), "%u.%u.%u.%u", &o1, &o2, &o3, &o4) != 4) {
-        return false;  // Invalid IP format
-    }
-    
-    // Check private ranges:
-    // 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8
-    if (o1 == 10) return true;
-    if (o1 == 172 && o2 >= 16 && o2 <= 31) return true;
-    if (o1 == 192 && o2 == 168) return true;
-    if (o1 == 127) return true;
-    
-    return false;
-}
-} // namespace'''
-
-if search_for in content:
-    content = content.replace(search_for, helper_function)
-    p.write_text(content, encoding="utf-8")
-    print("✓ Added IsPrivateIP helper to verify_user_jwt.cpp")
-else:
-    print("WARNING: Could not find include statement")
-PY
-
-# Improve JWT verification error messaging
 RUN python3 - <<'PY'
 from pathlib import Path
 
