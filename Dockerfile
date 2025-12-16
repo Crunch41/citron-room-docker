@@ -453,10 +453,10 @@ pattern = r'(LOG_DEBUG\(Network,\s*\n\s*"Packet to unknown IP \(broadcasting ins
 replacement = r'''\1
                 // Broadcast to all other members as fallback (safe for most LDN traffic)
                 bool sent_packet = false;
-                for (const auto& member : members) {
-                    if (member.peer != event->peer) {
+                for (const auto& dest_member : members) {
+                    if (dest_member.peer != event->peer) {
                         sent_packet = true;
-                        enet_peer_send(member.peer, 0, enet_packet);
+                        enet_peer_send(dest_member.peer, 0, enet_packet);
                     }
                 }
                 if (!sent_packet) {
