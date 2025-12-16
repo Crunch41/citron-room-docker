@@ -44,6 +44,9 @@ RUN apt-get update && \
       libxi-dev \
       # mbedtls
       libmbedtls-dev \
+      # Optional dependencies (suppress CMake warnings)
+      libusb-1.0-0-dev \
+      libgamemode-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
@@ -409,22 +412,28 @@ PY
 # ---------------------------------------------------------------------------
 RUN python3 - <<'PY'
 from pathlib import Path
+import re
 
 p = Path("src/network/room.cpp")
 content = p.read_text(encoding="utf-8")
 
 # Find the unknown IP error log in HandleLdnPacket
-# These are harmless - they occur when LDN packets contain players' home network IPs
-search_string = 'LOG_ERROR(Network, "Attempting to send to unknown IP address: {}"'
+# The actual source uses multi-line format with individual octets
+pattern = r'LOG_ERROR\(Network,\s*\n\s*"Attempting to send to unknown IP address: "\s*\n\s*"\{\}\.\{\}\.\{\}\.\{\}",\s*\n\s*destination_address\[0\], destination_address\[1\], destination_address\[2\],\s*\n\s*destination_address\[3\]\);'
 
-replacement_string = 'LOG_DEBUG(Network, "Packet to unknown IP (broadcasting instead): {}"'
+replacement = '''LOG_DEBUG(Network,
+          "Packet to unknown IP (broadcasting instead): "
+          "{}.{}.{}.{}",
+          destination_address[0], destination_address[1], destination_address[2],
+          destination_address[3]);'''
 
-if search_string in content:
-    content = content.replace(search_string, replacement_string)
+matches = re.findall(pattern, content)
+if len(matches) >= 1:
+    content = re.sub(pattern, replacement, content)
     p.write_text(content, encoding="utf-8")
-    print("✓ Suppressed unknown IP errors (moved to DEBUG level)")
+    print(f"✓ Suppressed {len(matches)} unknown IP error(s) (moved to DEBUG level)")
 else:
-    print("WARNING: Could not find unknown IP error log pattern")
+    print("INFO: PATCH 9 skipped (pattern not found in this Citron version)")
 PY
 
 # ---------------------------------------------------------------------------
@@ -437,34 +446,29 @@ import re
 p = Path("src/network/room.cpp")
 content = p.read_text(encoding="utf-8")
 
-# Find the HandleLdnPacket function and add broadcast fallback for unknown IPs
-# We need to find where unknown IPs cause a return, and broadcast instead
-
-# Look for the pattern where we return after logging unknown IP
-pattern = r'(LOG_DEBUG\(Network, "Packet to unknown IP \(broadcasting instead\): \{\}"[^;]+;)\s*return;'
+# Find the error log + enet_packet_destroy pattern in HandleLdnPacket
+# We'll replace the destroy with broadcast logic
+pattern = r'(LOG_DEBUG\(Network,\s*\n\s*"Packet to unknown IP \(broadcasting instead\): "\s*\n\s*"\{\}\.\{\}\.\{\}\.\{\}",\s*\n\s*destination_address\[0\], destination_address\[1\], destination_address\[2\],\s*\n\s*destination_address\[3\]\);)\s*\n\s*enet_packet_destroy\(enet_packet\);'
 
 replacement = r'''\1
-        
-        // Broadcast to all other members as fallback (safe for most LDN traffic)
-        std::lock_guard lock(member_mutex);
-        for (const auto& member : members) {
-            if (member.peer != event->peer) {
-                ENetPacket* fwd_packet = enet_packet_create(
-                    event->packet->data,
-                    event->packet->dataLength,
-                    ENET_PACKET_FLAG_RELIABLE
-                );
-                enet_peer_send(member.peer, 0, fwd_packet);
-            }
-        }
-        return;'''
+                // Broadcast to all other members as fallback (safe for most LDN traffic)
+                bool sent_packet = false;
+                for (const auto& member : members) {
+                    if (member.peer != event->peer) {
+                        sent_packet = true;
+                        enet_peer_send(member.peer, 0, enet_packet);
+                    }
+                }
+                if (!sent_packet) {
+                    enet_packet_destroy(enet_packet);
+                }'''
 
 if re.search(pattern, content):
     content = re.sub(pattern, replacement, content)
     p.write_text(content, encoding="utf-8")
     print("✓ Added broadcast fallback for unknown IP packets")
 else:
-    print("INFO: Broadcast fallback pattern not found (may require manual integration)")
+    print("INFO: PATCH 10 skipped (requires PATCH 9 - pattern not found in this Citron version)")
 PY
 
 # Configure - RELEASE BUILD (optimized, no debug symbols)
