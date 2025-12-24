@@ -42,8 +42,8 @@ ENABLE_CITRON_MODS="${ENABLE_CITRON_MODS:-false}"
 MAX_LOG_FILES="${MAX_LOG_FILES:-10}"  # Keep last 10 session logs
 
 # Generate timestamped log filename for this session
-SESSION_TIMESTAMP=$(date +%Y-%m-%d_%H-%M-%S)
-LOG_FILE="${LOG_DIR}/citron-room_${SESSION_TIMESTAMP}.log"
+SESSION_TIMESTAMP=$(date +%d-%m-%Y_%H-%M-%S)
+LOG_FILE="${LOG_DIR}/session_${SESSION_TIMESTAMP}.log"
 
 # Ensure log directory exists
 mkdir -p "$LOG_DIR"
@@ -56,10 +56,10 @@ fi
 
 # Function: Cleanup old session logs (keep last N)
 cleanup_old_logs() {
-    local log_count=$(ls -1 "${LOG_DIR}"/citron-room_*.log 2>/dev/null | wc -l)
+    local log_count=$(ls -1 "${LOG_DIR}"/session_*.log 2>/dev/null | wc -l)
     if [ "$log_count" -gt "$MAX_LOG_FILES" ]; then
         local to_delete=$((log_count - MAX_LOG_FILES))
-        ls -1t "${LOG_DIR}"/citron-room_*.log | tail -n "$to_delete" | while read -r old_log; do
+        ls -1t "${LOG_DIR}"/session_*.log | tail -n "$to_delete" | while read -r old_log; do
             echo "Removing old session log: $(basename "$old_log")"
             rm -f "$old_log"
         done

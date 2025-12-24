@@ -56,7 +56,8 @@ docker run -d -p 24872:24872/tcp -p 24872:24872/udp \
 | `ENABLE_CITRON_MODS` | No | false | Allow moderators |
 | `LOG_DIR` | No | /home/citron/.local/share/citron-room | Log directory |
 | `MAX_LOG_FILES` | No | 10 | Number of session logs to keep |
-
+| `PUID` | No | 99 | User ID for file permissions (Unraid: 99) |
+| `PGID` | No | 100 | Group ID for file permissions (Unraid: 100) |
 
 **Note**: `ROOM_NAME` and `PREFERRED_GAME` are required by Citron. Server will fail to start without them.
 
@@ -120,20 +121,20 @@ BadUsername2
 ### Logs
 
 - **Console**: `docker logs <container-name>`
-- **Log files**: `/home/citron/.local/share/citron-room/citron-room_YYYY-MM-DD_HH-MM-SS.log`
+- **Log files**: `/home/citron/.local/share/citron-room/session_DD-MM-YYYY_HH-MM-SS.log`
 
 **Logging Features** ✨:
 - ✅ **Per-session logs** - Each container restart creates a new timestamped log
 - ✅ **Auto-cleanup** - Keeps last 10 session logs (configurable via `MAX_LOG_FILES`)
-- ✅ **Clean format** - ANSI color codes stripped from file
+- ✅ **Color support** - View logs with colors using `less -R` or `cat`
 - ✅ **Real timestamps** - Human-readable `[HH:MM:SS]` format
 - ✅ **Persistent** - Survives container restarts (requires volume mount)
 
 **Log files**:
 ```
-citron-room_2024-12-25_10-30-00.log   # Session 1
-citron-room_2024-12-25_14-45-30.log   # Session 2
-citron-room_2024-12-26_09-00-00.log   # Session 3 (newest)
+session_25-12-2024_10-30-00.log   # Session 1
+session_25-12-2024_14-45-30.log   # Session 2
+session_26-12-2024_09-00-00.log   # Session 3 (newest)
 ```
 
 ## Bug Fixes Included
