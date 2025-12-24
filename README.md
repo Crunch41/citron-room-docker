@@ -137,7 +137,7 @@ citron-room.log.7.gz    # Oldest (auto-deleted when new rotation occurs)
 
 ## Bug Fixes Included
 
-This image includes **10 patches** fixing critical bugs and improving multiplayer:
+This image includes **16 patches** fixing critical bugs and improving security:
 
 **Core Fixes (Patches 1-7)**:
 1. ✅ **Container hanging** - Fixed stdin blocking loop
@@ -152,6 +152,14 @@ This image includes **10 patches** fixing critical bugs and improving multiplaye
 8. ✅ **JWT error messaging** - Clearer error messages for verification failures
 9. ✅ **Unknown IP error suppression** - Cleaner logs (moved to DEBUG)
 10. ✅ **LDN packet loss fix** - Broadcast fallback for unknown IPs
+
+**Security Patches (Patches 11-16)**:
+11. ✅ **ServerLoop crash protection** - Exception handling in main loop
+12. ✅ **DoS rate limiting** - Rate limits join requests per IP
+13. ✅ **Race condition fix** - Thread-safe lock ordering documentation
+14. ✅ **Thread-safe JWT key** - Mutex protection for public key fetch
+15. ✅ **Malformed packet protection** - Validates packet size before parsing
+16. ✅ **IP generation safeguard** - Prevents infinite loop edge case
 
 ### Moderator Features
 

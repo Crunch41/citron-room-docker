@@ -4,7 +4,7 @@ All patches applied to fix critical bugs in vanilla Citron dedicated room server
 
 ## Overview
 
-**Total Patches**: 10  
+**Total Patches**: 16  
 **Image Size**: ~380MB (compressed ~130MB)  
 **Build Type**: Release (optimized, stripped)  
 **Status**: ✅ Production Ready
@@ -473,3 +473,270 @@ All 10 patches are production-ready and can be submitted upstream to fix these c
 - **Accurate LAN detection** using IP address validation instead of JWT error codes
 - **Zero LDN packet loss** with broadcast fallback for unknown IPs
 - **Cleaner logs** without harmless unknown IP errors
+
+---
+
+## Patch #11: ServerLoop Exception Handling ⭐ CRITICAL
+
+**Purpose**: Prevent server crashes from unhandled exceptions in packet handlers
+
+**File**: `src/network/room.cpp`
+
+**Before**:
+```cpp
+void Room::RoomImpl::ServerLoop() {
+    while (state != State::Closed) {
+        ENetEvent event;
+        if (enet_host_service(server, &event, 5) > 0) {
+            // Any exception here terminates the entire process!
+            switch (event.type) { ... }
+        }
+    }
+}
+```
+
+**After**:
+```cpp
+void Room::RoomImpl::ServerLoop() {
+    while (state != State::Closed) {
+        try {
+            ENetEvent event;
+            if (enet_host_service(server, &event, 5) > 0) {
+                switch (event.type) { ... }
+            }
+        } catch (const std::exception& e) {
+            LOG_ERROR(Network, "ServerLoop error: {}", e.what());
+        } catch (...) {
+            LOG_ERROR(Network, "ServerLoop unknown error");
+        }
+    }
+}
+```
+
+**Why Needed**: The main server loop had no exception safety. Any unhandled exception (e.g., from malformed packets, network errors) would call `std::terminate()` and crash the entire server silently.
+
+---
+
+## Patch #12: Rate Limiting for Join Requests
+
+**Purpose**: Prevent DoS attacks by rate limiting join requests per IP
+
+**File**: `src/network/room.cpp`
+
+**Added Code**:
+```cpp
+// In RoomImpl class:
+std::unordered_map<u32, std::chrono::steady_clock::time_point> last_join_attempt;
+static constexpr auto JOIN_RATE_LIMIT = std::chrono::seconds(1);
+
+// In HandleJoinRequest:
+auto now = std::chrono::steady_clock::now();
+u32 client_ip = event->peer->address.host;
+if (last_join_attempt.count(client_ip)) {
+    if (now - last_join_attempt[client_ip] < JOIN_RATE_LIMIT) {
+        LOG_WARNING(Network, "Rate limiting join request");
+        return;
+    }
+}
+last_join_attempt[client_ip] = now;
+```
+
+**Why Needed**: Without rate limiting, an attacker could:
+- Flood the server with join requests
+- Exhaust server resources
+- DoS the JWT verification endpoint
+
+---
+
+## Patch #13: Race Condition Documentation
+
+**Purpose**: Document that the lock ordering in HandleJoinRequest is correct
+
+**File**: `src/network/room.cpp`
+
+**Analysis**: After review, `HasModPermission()` acquires its own lock internally, making the lock ordering safe. Added documentation comment to clarify this for future maintainers.
+
+---
+
+## Patch #14: Thread-Safe GetPublicKey
+
+**Purpose**: Prevent data race when fetching JWT public key
+
+**File**: `src/web_service/verify_user_jwt.cpp`
+
+**Before**:
+```cpp
+static std::string public_key;  // No thread safety!
+
+std::string GetPublicKey(const std::string& host) {
+    if (public_key.empty()) {
+        // Two threads could enter here simultaneously
+        public_key = client.GetPlain("/jwt/external/key.pem", true).returned_data;
+    }
+    return public_key;
+}
+```
+
+**After**:
+```cpp
+static std::string public_key;
+static std::mutex public_key_mutex;
+
+std::string GetPublicKey(const std::string& host) {
+    std::lock_guard<std::mutex> lock(public_key_mutex);
+    if (public_key.empty()) {
+        public_key = client.GetPlain("/jwt/external/key.pem", true).returned_data;
+    }
+    return public_key;
+}
+```
+
+**Why Needed**: If two users join simultaneously before the JWT public key is fetched, both threads would try to fetch and write to the same static variable, causing undefined behavior.
+
+---
+
+## Patch #15: Packet Bounds Validation ⭐ CRITICAL
+
+**Purpose**: Prevent crashes from malformed packets
+
+**File**: `src/network/room.cpp`
+
+**Added Code**:
+```cpp
+void Room::RoomImpl::HandleJoinRequest(const ENetEvent* event) {
+    // Minimum packet size validation
+    if (event->packet->dataLength < 12) {
+        LOG_WARNING(Network, "Malformed join request: packet too small ({} bytes)", 
+                   event->packet->dataLength);
+        return;
+    }
+    // ... rest of handler
+}
+```
+
+**Why Needed**: The original code read from packets without checking if there was enough data. A malicious client could send a truncated packet and cause:
+- Buffer over-reads
+- Crashes
+- Potential security vulnerabilities
+
+---
+
+## Patch #16: IP Generation Infinite Loop Safeguard
+
+**Purpose**: Prevent server hang if all fake IPs are taken
+
+**File**: `src/network/room.cpp`
+
+**Before**:
+```cpp
+IPv4Address GenerateFakeIPAddress() {
+    IPv4Address result_ip{192, 168, 0, 0};
+    do {
+        // Generate random IP
+    } while (!IsValidFakeIPAddress(result_ip));  // Could loop forever!
+    return result_ip;
+}
+```
+
+**After**:
+```cpp
+IPv4Address GenerateFakeIPAddress() {
+    IPv4Address result_ip{192, 168, 0, 0};
+    constexpr int MAX_ATTEMPTS = 10000;
+    int attempts = 0;
+    
+    do {
+        // Generate random IP
+        if (++attempts > MAX_ATTEMPTS) {
+            LOG_ERROR(Network, "Failed to generate unique fake IP after {} attempts", MAX_ATTEMPTS);
+            return {0, 0, 0, 0};  // Sentinel value
+        }
+    } while (!IsValidFakeIPAddress(result_ip));
+    return result_ip;
+}
+```
+
+**Why Needed**: While unlikely (max 254 members, 65536 possible IPs), the function had no safeguard against infinite loops. Now it fails gracefully after 10,000 attempts.
+
+---
+
+## Updated Summary Table
+
+| Patch | File | Severity | Fixes |
+|-------|------|----------|-------|
+| #1 | citron_room.cpp | Medium | Container hanging |
+| #2 | citron_room.cpp | **CRITICAL** | NULL crash on public rooms |
+| #3 | announce_room_json.cpp | Medium | JSON parsing crashes |
+| #4 | announce_multiplayer_session.cpp | Medium | Silent thread crashes |
+| #5 | citron_room.cpp | **CRITICAL** | Instant segfault with username |
+| #6 | room.cpp | Low | Moderator visibility |
+| #7 | room.cpp | **CRITICAL** | LAN moderator permissions |
+| #8 | verify_user_jwt.cpp | Low | JWT error messaging |
+| #9 | room.cpp | Low | Unknown IP error spam |
+| #10 | room.cpp | **CRITICAL** | LDN packet loss fix |
+| #11 | room.cpp | **CRITICAL** | ServerLoop crash protection |
+| #12 | room.cpp | Medium | DoS rate limiting |
+| #13 | room.cpp | Low | Race condition documentation |
+| #14 | verify_user_jwt.cpp | Medium | Thread-safe JWT key fetch |
+| #15 | room.cpp | **CRITICAL** | Malformed packet protection |
+| #16 | room.cpp | Medium | IP generation safeguard |
+
+---
+
+## Final Log Output
+
+**With all 16 patches applied**:
+```
+[Network] Room is open. Close with Q+Enter...
+[WebService] Room has been registered
+[WebService] JWT signature verification skipped (error code 2)
+[Network] [192.168.10.100] Crunch41 has joined.
+[Network] User 'Crunch41' (Crunch41) joined as MODERATOR
+[Network] [111.111.111.111] RemotePlayer has joined.
+```
+
+Clean, informative, secure, and crash-resistant! ✨
+
+---
+
+## Verification
+
+**All patches applied successfully**:
+```
+✓ Patched stdin loop
+✓ Fixed lobby_api_url (2 locations)
+✓ Added Register() error handling
+✓ Added thread safety wrapper
+✓ Fixed username argument (required)
+✓ Added moderator join logging with correct member lookup
+✓ Added LAN moderator detection (nickname check)
+✓ Improved JWT verification error messaging
+✓ Suppressed unknown IP errors (moved to DEBUG level)
+✓ Added broadcast fallback for unknown IP packets
+✓ Added ServerLoop exception handling
+✓ Added join request rate limiting
+✓ Added race condition documentation
+✓ Added thread-safe GetPublicKey
+✓ Added packet bounds validation
+✓ Added IP generation infinite loop safeguard
+```
+
+**Build Configuration**:
+- CMake: Release build type
+- Binary: Stripped
+- No debug tools in production image
+- Final size: ~380MB uncompressed, ~130MB compressed
+
+---
+
+## For Citron Developers
+
+All 16 patches are production-ready and can be submitted upstream to fix these critical issues in the vanilla Citron Room Server.
+
+**Security Patches** (Patches 11-16):
+- **ServerLoop crash protection** - Prevents entire server from dying on exceptions
+- **DoS rate limiting** - Limits join requests per IP
+- **Thread-safe JWT key** - Fixes data race in public key fetch
+- **Malformed packet protection** - Validates packet size before parsing
+- **IP generation safeguard** - Prevents infinite loop edge case
+
