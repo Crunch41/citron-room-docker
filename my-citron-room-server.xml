@@ -1,0 +1,40 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>citron-room-server</Name>
+  <Repository>crunch41/citron-room-server:latest</Repository>
+  <Registry>https://hub.docker.com/r/crunch41/citron-room-server</Registry>
+  <Network>bridge</Network>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/Crunch41/citron-room-docker</Support>
+  <Project>https://git.citron-emu.org/Citron/Emulator</Project>
+  <Overview>Citron Room Server - Dedicated multiplayer server for Citron Nintendo Switch Emulator with 17 bug fixes. Features per-session logging with human-readable timestamps, automatic log cleanup, PUID/PGID support, and supports up to 254 concurrent players with ban list persistence and public room announcements.</Overview>
+  <Category>GameServers:</Category>
+  <WebUI/>
+  <TemplateURL>https://raw.githubusercontent.com/Crunch41/citron-room-docker/main/my-citron-room-server.xml</TemplateURL>
+  <Icon>https://img.utdstc.com/icon/e5d/50f/e5d50f158c1040d7c70551e7db7d05d1c1642c3140f67d2f74060115bae93a13:200</Icon>
+  <ExtraParams/>
+  <PostArgs/>
+  <CPUset/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+  <Config Name="UDP Port" Target="24872" Default="24872" Mode="udp" Description="UDP port for game traffic" Type="Port" Display="always" Required="true" Mask="false">24872</Config>
+  <Config Name="TCP Port" Target="24872" Default="24872" Mode="tcp" Description="TCP port for game traffic" Type="Port" Display="always" Required="true" Mask="false">24872</Config>
+  <Config Name="Data Directory" Target="/home/citron/.local/share/citron-room" Default="/mnt/user/appdata/citron-room" Mode="rw" Description="Persistent storage for ban lists and session logs. Each container restart creates a new timestamped log file." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/citron-room</Config>
+  <Config Name="Room Name" Target="ROOM_NAME" Default="Citron Room" Mode="" Description="The name of your multiplayer room (shown in lobby)" Type="Variable" Display="always" Required="true" Mask="false">Citron Room</Config>
+  <Config Name="Room Description" Target="ROOM_DESCRIPTION" Default="" Mode="" Description="Description shown to players in lobby" Type="Variable" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="Preferred Game" Target="PREFERRED_GAME" Default="Any Game" Mode="" Description="Preferred game name shown in lobby" Type="Variable" Display="always" Required="true" Mask="false">Any Game</Config>
+  <Config Name="Preferred Game ID" Target="PREFERRED_GAME_ID" Default="0" Mode="" Description="Preferred game ID in hex (e.g., 01006A800016E000 for Smash Bros). Set to 0 for any game." Type="Variable" Display="always" Required="false" Mask="false">0</Config>
+  <Config Name="Max Members" Target="MAX_MEMBERS" Default="16" Mode="" Description="Maximum players allowed in room (2-254)" Type="Variable" Display="always" Required="false" Mask="false">16</Config>
+  <Config Name="Password" Target="PASSWORD" Default="" Mode="" Description="Room password (leave empty for no password)" Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="Lobby Username" Target="USERNAME" Default="" Mode="" Description="Your Citron username (required for public rooms)" Type="Variable" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="Lobby Token" Target="TOKEN" Default="" Mode="" Description="Your Citron token (required for public rooms). Get from Citron account settings." Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="Web API URL" Target="WEB_API_URL" Default="" Mode="" Description="Citron API URL for public rooms (e.g., https://api.ynet-fun.xyz)" Type="Variable" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="Enable Citron Mods" Target="ENABLE_CITRON_MODS" Default="false" Mode="" Description="Allow Citron community moderators to moderate your room (true/false)" Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+  <Config Name="Max Log Files" Target="MAX_LOG_FILES" Default="10" Mode="" Description="Number of session log files to keep. Each container restart creates a new log. Older logs are automatically deleted." Type="Variable" Display="advanced" Required="false" Mask="false">10</Config>
+  <Config Name="Port" Target="PORT" Default="24872" Mode="" Description="Server port (must match exposed ports above)" Type="Variable" Display="advanced" Required="false" Mask="false">24872</Config>
+  <Config Name="Bind Address" Target="BIND_ADDRESS" Default="0.0.0.0" Mode="" Description="Bind address (0.0.0.0 for all interfaces)" Type="Variable" Display="advanced" Required="false" Mask="false">0.0.0.0</Config>
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="User ID for file permissions (99 = nobody on Unraid)" Type="Variable" Display="advanced" Required="false" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Group ID for file permissions (100 = users on Unraid)" Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
+</Container>

@@ -827,7 +827,7 @@ RUN cmake --build build --target citron-room -j"$(nproc)" && \
 FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Runtime libraries only (no build tools, no debug tools)
+# Runtime libraries + gosu for PUID/PGID support
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       ca-certificates \
@@ -847,21 +847,27 @@ RUN apt-get update && \
       libswscale7 \
       libswresample4 \
       gzip \
+      gosu \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy stripped binary
 COPY --from=builder /src/build/bin/citron-room /usr/local/bin/citron-room
 
-# Create non-root user
-RUN useradd -m citron && \
+# Create citron user with default UID/GID (will be modified at runtime by entrypoint)
+RUN groupadd -g 1000 citron && \
+    useradd -u 1000 -g citron -m citron && \
     mkdir -p /home/citron/.local/share/citron-room && \
     chown -R citron:citron /home/citron
 
-# Copy entrypoint
-COPY --chown=citron:citron docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+# Copy entrypoint (root-owned, will drop privileges at runtime)
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-USER citron
+# Environment variables for Unraid/LinuxServer.io compatibility
+# Defaults: PUID=99 (nobody), PGID=100 (users) - standard for Unraid
+ENV PUID=99
+ENV PGID=100
+
 WORKDIR /home/citron
 
 EXPOSE 24872/tcp

@@ -1,7 +1,31 @@
 #!/bin/bash
 set -e
 
+# ============================================================================
+# PUID/PGID handling (LinuxServer.io style for Unraid compatibility)
+# Defaults: PUID=99 (nobody), PGID=100 (users) - standard for Unraid
+# ============================================================================
+PUID="${PUID:-99}"
+PGID="${PGID:-100}"
+
+# Only run user modification if we're root
+if [ "$(id -u)" = "0" ]; then
+    echo "Setting up user citron with PUID=${PUID} PGID=${PGID}"
+    
+    # Modify the citron user/group to match requested IDs
+    groupmod -o -g "$PGID" citron 2>/dev/null || true
+    usermod -o -u "$PUID" citron 2>/dev/null || true
+    
+    # Fix ownership of home directory
+    chown -R citron:citron /home/citron
+    
+    # Re-exec this script as the citron user
+    exec gosu citron "$0" "$@"
+fi
+
+# ============================================================================
 # Default values
+# ============================================================================
 ROOM_NAME="${ROOM_NAME:-Citron Room}"
 ROOM_DESCRIPTION="${ROOM_DESCRIPTION:-}"
 PORT="${PORT:-24872}"
@@ -62,6 +86,7 @@ fi
     echo "================================================================================"
     echo "Timestamp: $(date -Iseconds)"
     echo "Log File:  $(basename "$LOG_FILE")"
+    echo "User:      $(id)"
     echo ""
     echo "Configuration:"
     echo "  Room Name: $ROOM_NAME"
