@@ -120,19 +120,17 @@ BadUsername2
 ### Logs
 
 - **Console**: `docker logs <container-name>`
-- **Current session**: `/home/citron/.local/share/citron-room/citron-room.log` (symlink to latest)
-- **All sessions**: `/home/citron/.local/share/citron-room/citron-room_YYYY-MM-DD_HH-MM-SS.log`
+- **Log files**: `/home/citron/.local/share/citron-room/citron-room_YYYY-MM-DD_HH-MM-SS.log`
 
 **Logging Features** ✨:
 - ✅ **Per-session logs** - Each container restart creates a new timestamped log
 - ✅ **Auto-cleanup** - Keeps last 10 session logs (configurable via `MAX_LOG_FILES`)
-- ✅ **Latest symlink** - `citron-room.log` always points to current session
 - ✅ **Clean format** - ANSI color codes stripped from file
+- ✅ **Real timestamps** - Human-readable `[HH:MM:SS]` format
 - ✅ **Persistent** - Survives container restarts (requires volume mount)
 
 **Log files**:
 ```
-citron-room.log                        # Symlink to current session
 citron-room_2024-12-25_10-30-00.log   # Session 1
 citron-room_2024-12-25_14-45-30.log   # Session 2
 citron-room_2024-12-26_09-00-00.log   # Session 3 (newest)

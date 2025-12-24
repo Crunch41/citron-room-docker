@@ -44,19 +44,15 @@ MAX_LOG_FILES="${MAX_LOG_FILES:-10}"  # Keep last 10 session logs
 # Generate timestamped log filename for this session
 SESSION_TIMESTAMP=$(date +%Y-%m-%d_%H-%M-%S)
 LOG_FILE="${LOG_DIR}/citron-room_${SESSION_TIMESTAMP}.log"
-LATEST_LOG="${LOG_DIR}/citron-room.log"
 
 # Ensure log directory exists
 mkdir -p "$LOG_DIR"
 
-# Create symlink for "latest" log
-ln -sf "$LOG_FILE" "$LATEST_LOG"
-
-# Symlink Citron's internal log path to our current session log
-# (Citron writes to ~/.local/share/citron/log/citron_log.txt internally)
-CITRON_LOG_DIR="/home/citron/.local/share/citron/log"
-mkdir -p "$CITRON_LOG_DIR"
-ln -sf "$LOG_FILE" "${CITRON_LOG_DIR}/citron_log.txt"
+# Create ban list file with correct header if it doesn't exist
+if [ ! -f "$BAN_LIST_FILE" ]; then
+    echo "CitronRoom-BanList-1" > "$BAN_LIST_FILE"
+    echo "" >> "$BAN_LIST_FILE"
+fi
 
 # Function: Cleanup old session logs (keep last N)
 cleanup_old_logs() {
@@ -114,7 +110,7 @@ CMD=("/usr/local/bin/citron-room" \
   "--ban-list-file" "$BAN_LIST_FILE")
 
 # Note: --log-file is NOT passed because Citron ignores it
-# Instead, we symlink Citron's internal log path to our session log
+# We capture stdout/stderr via tee instead
 
 # Add optional parameters
 if [ -n "$ROOM_DESCRIPTION" ]; then
@@ -136,5 +132,6 @@ if [ -n "$USERNAME" ] && [ -n "$TOKEN" ] && [ -n "$WEB_API_URL" ]; then
           "--web-api-url" "$WEB_API_URL")
 fi
 
-# Execute with ANSI stripping for log file (keep colors in console)
-exec "${CMD[@]}" 2>&1 | tee >(sed -u 's/\x1b\[[0-9;]*m//g' >> "$LOG_FILE")
+# Execute and log (tee to both console and file)
+# ANSI codes are kept in file - use 'less -R' or 'cat' to view with colors
+"${CMD[@]}" 2>&1 | tee -a "$LOG_FILE"
