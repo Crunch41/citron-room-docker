@@ -848,6 +848,7 @@ RUN apt-get update && \
       libswresample4 \
       gzip \
       gosu \
+      tini \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy stripped binary
@@ -876,4 +877,5 @@ EXPOSE 24872/udp
 
 VOLUME ["/home/citron/.local/share/citron-room"]
 
-ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+# Use tini as init for proper signal handling (faster stops)
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/docker-entrypoint.sh"]

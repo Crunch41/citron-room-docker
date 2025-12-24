@@ -131,7 +131,24 @@ if [ -n "$USERNAME" ] && [ -n "$TOKEN" ] && [ -n "$WEB_API_URL" ]; then
           "--token" "$TOKEN" \
           "--web-api-url" "$WEB_API_URL")
 fi
+# Signal handling for graceful shutdown
+CITRON_PID=""
+cleanup() {
+    echo ""
+    echo "Received shutdown signal, stopping citron-room..."
+    if [ -n "$CITRON_PID" ]; then
+        kill -TERM "$CITRON_PID" 2>/dev/null || true
+        wait "$CITRON_PID" 2>/dev/null || true
+    fi
+    echo "Citron Room Server stopped."
+    exit 0
+}
+trap cleanup SIGTERM SIGINT SIGHUP
 
 # Execute and log (tee to both console and file)
-# ANSI codes are kept in file - use 'less -R' or 'cat' to view with colors
-"${CMD[@]}" 2>&1 | tee -a "$LOG_FILE"
+# Run in background so we can handle signals
+"${CMD[@]}" 2>&1 | tee -a "$LOG_FILE" &
+CITRON_PID=$!
+
+# Wait for the process to exit
+wait $CITRON_PID
