@@ -4,7 +4,7 @@ All patches applied to fix critical bugs in vanilla Citron dedicated room server
 
 ## Overview
 
-**Total Patches**: 16  
+**Total Patches**: 17  
 **Image Size**: ~380MB (compressed ~130MB)  
 **Build Type**: Release (optimized, stripped)  
 **Status**: ✅ Production Ready
@@ -660,6 +660,34 @@ IPv4Address GenerateFakeIPAddress() {
 
 ---
 
+## Patch #17: Cleaner Log Format
+
+**Purpose**: Make logs human-readable with real timestamps
+
+**File**: `src/common/logging/text_formatter.cpp`
+
+**Before**:
+```
+[359443.476077] Network <Info> network/room.cpp:SendStatusMessage:770: [1.121.194.75] BBBCNews has joined.
+[359443.476113] Network <Info> network/room.cpp:HandleGameInfoPacket:1047: BBBCNews is playing Super Smash Bros. Ultimate (13.0.4)
+```
+
+**After**:
+```
+[10:23:45] [1.121.194.75] BBBCNews has joined.
+[10:23:45] BBBCNews is playing Super Smash Bros. Ultimate (13.0.4)
+```
+
+**Changes Made**:
+- Real wall-clock timestamps (HH:MM:SS) instead of uptime in seconds
+- Removed verbose file path and line numbers for info-level messages
+- Warnings and errors still show class and level for debugging
+- Much cleaner and easier to read
+
+**Why Needed**: The original format was designed for developers debugging the emulator, not for server operators monitoring a room. Real timestamps and clean messages make logs actionable.
+
+---
+
 ## Updated Summary Table
 
 | Patch | File | Severity | Fixes |
@@ -680,19 +708,21 @@ IPv4Address GenerateFakeIPAddress() {
 | #14 | verify_user_jwt.cpp | Medium | Thread-safe JWT key fetch |
 | #15 | room.cpp | **CRITICAL** | Malformed packet protection |
 | #16 | room.cpp | Medium | IP generation safeguard |
+| #17 | text_formatter.cpp | Low | Human-readable log format |
 
 ---
 
 ## Final Log Output
 
-**With all 16 patches applied**:
+**With all 17 patches applied**:
 ```
-[Network] Room is open. Close with Q+Enter...
-[WebService] Room has been registered
-[WebService] JWT signature verification skipped (error code 2)
-[Network] [192.168.10.100] Crunch41 has joined.
-[Network] User 'Crunch41' (Crunch41) joined as MODERATOR
-[Network] [111.111.111.111] RemotePlayer has joined.
+[10:23:45] Room is open. Close with Q+Enter...
+[10:23:45] Room has been registered
+[10:23:50] JWT signature verification skipped (error code 2)
+[10:23:50] [192.168.10.100] Crunch41 has joined.
+[10:23:50] User 'Crunch41' (Crunch41) joined as MODERATOR
+[10:24:15] [111.111.111.111] RemotePlayer has joined.
+[10:24:16] RemotePlayer is playing Super Smash Bros. Ultimate (13.0.4)
 ```
 
 Clean, informative, secure, and crash-resistant! ✨
@@ -719,6 +749,7 @@ Clean, informative, secure, and crash-resistant! ✨
 ✓ Added thread-safe GetPublicKey
 ✓ Added packet bounds validation
 ✓ Added IP generation infinite loop safeguard
+✓ Patched log format to be cleaner and human-readable
 ```
 
 **Build Configuration**:
@@ -731,12 +762,12 @@ Clean, informative, secure, and crash-resistant! ✨
 
 ## For Citron Developers
 
-All 16 patches are production-ready and can be submitted upstream to fix these critical issues in the vanilla Citron Room Server.
+All 17 patches are production-ready and can be submitted upstream to fix these critical issues in the vanilla Citron Room Server.
 
-**Security Patches** (Patches 11-16):
+**Security & UX Patches** (Patches 11-17):
 - **ServerLoop crash protection** - Prevents entire server from dying on exceptions
 - **DoS rate limiting** - Limits join requests per IP
 - **Thread-safe JWT key** - Fixes data race in public key fetch
 - **Malformed packet protection** - Validates packet size before parsing
 - **IP generation safeguard** - Prevents infinite loop edge case
-
+- **Cleaner log format** - Human-readable timestamps, no verbose file paths

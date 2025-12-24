@@ -54,6 +54,9 @@ docker run -d -p 24872:24872/tcp -p 24872:24872/udp \
 | `BIND_ADDRESS` | No | 0.0.0.0 | Bind IP address |
 | `PORT` | No | 24872 | Server port |
 | `ENABLE_CITRON_MODS` | No | false | Allow moderators |
+| `LOG_DIR` | No | /home/citron/.local/share/citron-room | Log directory |
+| `MAX_LOG_FILES` | No | 10 | Number of session logs to keep |
+
 
 **Note**: `ROOM_NAME` and `PREFERRED_GAME` are required by Citron. Server will fail to start without them.
 
@@ -117,27 +120,27 @@ BadUsername2
 ### Logs
 
 - **Console**: `docker logs <container-name>`
-- **File**: `/home/citron/.local/share/citron-room/citron-room.log` (requires volume)
+- **Current session**: `/home/citron/.local/share/citron-room/citron-room.log` (symlink to latest)
+- **All sessions**: `/home/citron/.local/share/citron-room/citron-room_YYYY-MM-DD_HH-MM-SS.log`
 
 **Logging Features** ✨:
-- ✅ **Automatic rotation** - Rotates at 10MB, keeps last 7 files
-- ✅ **Compression** - Old logs gzip compressed (saves space)
+- ✅ **Per-session logs** - Each container restart creates a new timestamped log
+- ✅ **Auto-cleanup** - Keeps last 10 session logs (configurable via `MAX_LOG_FILES`)
+- ✅ **Latest symlink** - `citron-room.log` always points to current session
 - ✅ **Clean format** - ANSI color codes stripped from file
-- ✅ **ISO timestamps** - Each start includes ISO timestamp
-- ✅ **Persistent** - Survives container restarts
+- ✅ **Persistent** - Survives container restarts (requires volume mount)
 
 **Log files**:
 ```
-citron-room.log         # Current log (clean text)
-citron-room.log.1.gz    # Previous rotation (compressed)
-citron-room.log.2.gz    # 2nd rotation
-...
-citron-room.log.7.gz    # Oldest (auto-deleted when new rotation occurs)
+citron-room.log                        # Symlink to current session
+citron-room_2024-12-25_10-30-00.log   # Session 1
+citron-room_2024-12-25_14-45-30.log   # Session 2
+citron-room_2024-12-26_09-00-00.log   # Session 3 (newest)
 ```
 
 ## Bug Fixes Included
 
-This image includes **16 patches** fixing critical bugs and improving security:
+This image includes **17 patches** fixing critical bugs and improving security:
 
 **Core Fixes (Patches 1-7)**:
 1. ✅ **Container hanging** - Fixed stdin blocking loop
@@ -153,13 +156,14 @@ This image includes **16 patches** fixing critical bugs and improving security:
 9. ✅ **Unknown IP error suppression** - Cleaner logs (moved to DEBUG)
 10. ✅ **LDN packet loss fix** - Broadcast fallback for unknown IPs
 
-**Security Patches (Patches 11-16)**:
+**Security Patches (Patches 11-17)**:
 11. ✅ **ServerLoop crash protection** - Exception handling in main loop
 12. ✅ **DoS rate limiting** - Rate limits join requests per IP
 13. ✅ **Race condition fix** - Thread-safe lock ordering documentation
 14. ✅ **Thread-safe JWT key** - Mutex protection for public key fetch
 15. ✅ **Malformed packet protection** - Validates packet size before parsing
 16. ✅ **IP generation safeguard** - Prevents infinite loop edge case
+17. ✅ **Cleaner log format** - Human-readable timestamps, removes verbose file paths
 
 ### Moderator Features
 

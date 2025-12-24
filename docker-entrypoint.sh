@@ -11,43 +11,43 @@ PASSWORD="${PASSWORD:-}"
 PREFERRED_GAME="${PREFERRED_GAME:-Any Game}"
 PREFERRED_GAME_ID="${PREFERRED_GAME_ID:-0}"
 BAN_LIST_FILE="${BAN_LIST_FILE:-/home/citron/.local/share/citron-room/ban_list.txt}"
-LOG_FILE="${LOG_FILE:-/home/citron/.local/share/citron-room/citron-room.log}"
+LOG_DIR="${LOG_DIR:-/home/citron/.local/share/citron-room}"
 ENABLE_CITRON_MODS="${ENABLE_CITRON_MODS:-false}"
 
-# Log rotation settings
-MAX_LOG_SIZE=$((10 * 1024 * 1024))  # 10MB
-MAX_LOG_FILES=7
+# Log settings
+MAX_LOG_FILES="${MAX_LOG_FILES:-10}"  # Keep last 10 session logs
 
-# Function: Rotate logs if needed
-rotate_logs() {
-    if [ ! -f "$LOG_FILE" ]; then
-        return
-    fi
-    
-    local log_size=$(stat -c%s "$LOG_FILE" 2>/dev/null || stat -f%z "$LOG_FILE" 2>/dev/null || echo 0)
-    
-    if [ "$log_size" -gt "$MAX_LOG_SIZE" ]; then
-        echo "Rotating log file (size: $((log_size / 1024 / 1024))MB)"
-        
-        # Rotate existing backup logs
-        for i in $(seq $((MAX_LOG_FILES - 1)) -1 1); do
-            if [ -f "${LOG_FILE}.$i.gz" ]; then
-                mv "${LOG_FILE}.$i.gz" "${LOG_FILE}.$((i + 1)).gz"
-            fi
+# Generate timestamped log filename for this session
+SESSION_TIMESTAMP=$(date +%Y-%m-%d_%H-%M-%S)
+LOG_FILE="${LOG_DIR}/citron-room_${SESSION_TIMESTAMP}.log"
+LATEST_LOG="${LOG_DIR}/citron-room.log"
+
+# Ensure log directory exists
+mkdir -p "$LOG_DIR"
+
+# Create symlink for "latest" log
+ln -sf "$LOG_FILE" "$LATEST_LOG"
+
+# Symlink Citron's internal log path to our current session log
+# (Citron writes to ~/.local/share/citron/log/citron_log.txt internally)
+CITRON_LOG_DIR="/home/citron/.local/share/citron/log"
+mkdir -p "$CITRON_LOG_DIR"
+ln -sf "$LOG_FILE" "${CITRON_LOG_DIR}/citron_log.txt"
+
+# Function: Cleanup old session logs (keep last N)
+cleanup_old_logs() {
+    local log_count=$(ls -1 "${LOG_DIR}"/citron-room_*.log 2>/dev/null | wc -l)
+    if [ "$log_count" -gt "$MAX_LOG_FILES" ]; then
+        local to_delete=$((log_count - MAX_LOG_FILES))
+        ls -1t "${LOG_DIR}"/citron-room_*.log | tail -n "$to_delete" | while read -r old_log; do
+            echo "Removing old session log: $(basename "$old_log")"
+            rm -f "$old_log"
         done
-        
-        # Compress and rotate current log
-        gzip -c "$LOG_FILE" > "${LOG_FILE}.1.gz"
-        > "$LOG_FILE"  # Truncate current log
-        
-        # Delete old logs beyond retention
-        if [ -f "${LOG_FILE}.$((MAX_LOG_FILES + 1)).gz" ]; then
-            rm -f "${LOG_FILE}.$((MAX_LOG_FILES + 1)).gz"
-        fi
-        
-        echo "Log rotated. Keeping last $MAX_LOG_FILES rotations."
     fi
 }
+
+# Cleanup old logs before starting
+cleanup_old_logs
 
 # Determine mode
 MODE="Private (not announcing)"
@@ -55,14 +55,14 @@ if [ -n "$USERNAME" ] && [ -n "$TOKEN" ] && [ -n "$WEB_API_URL" ]; then
     MODE="Public (announcing to web service every 15s)"
 fi
 
-# Rotate logs before starting
-rotate_logs
-
-# Print configuration header (with ISO timestamp)
+# Print session header
 {
     echo "================================================================================"
-    echo "Citron Room Server Started: $(date -Iseconds)"
+    echo "Citron Room Server - Session Started"
     echo "================================================================================"
+    echo "Timestamp: $(date -Iseconds)"
+    echo "Log File:  $(basename "$LOG_FILE")"
+    echo ""
     echo "Configuration:"
     echo "  Room Name: $ROOM_NAME"
     if [ -n "$ROOM_DESCRIPTION" ]; then
@@ -72,12 +72,11 @@ rotate_logs
     echo "  Max Members: $MAX_MEMBERS (max: 254)"
     echo "  Bind Address: $BIND_ADDRESS"
     echo "  Ban List: $BAN_LIST_FILE"
-    echo "  Log File: $LOG_FILE (rotate at $((MAX_LOG_SIZE / 1024 / 1024))MB, keep ${MAX_LOG_FILES} files)"
     echo "  Network Version: 1"
     echo "  Mode: $MODE"
     echo "================================================================================"
     echo ""
-} | tee -a "$LOG_FILE"
+} | tee "$LOG_FILE"
 
 # Build command
 CMD=("/usr/local/bin/citron-room" \
@@ -87,8 +86,10 @@ CMD=("/usr/local/bin/citron-room" \
   "--bind-address" "$BIND_ADDRESS" \
   "--preferred-game" "$PREFERRED_GAME" \
   "--preferred-game-id" "$PREFERRED_GAME_ID" \
-  "--ban-list-file" "$BAN_LIST_FILE" \
-  "--log-file" "$LOG_FILE")
+  "--ban-list-file" "$BAN_LIST_FILE")
+
+# Note: --log-file is NOT passed because Citron ignores it
+# Instead, we symlink Citron's internal log path to our session log
 
 # Add optional parameters
 if [ -n "$ROOM_DESCRIPTION" ]; then
@@ -111,5 +112,4 @@ if [ -n "$USERNAME" ] && [ -n "$TOKEN" ] && [ -n "$WEB_API_URL" ]; then
 fi
 
 # Execute with ANSI stripping for log file (keep colors in console)
-# Use process substitution to strip ANSI codes before appending to log
 exec "${CMD[@]}" 2>&1 | tee >(sed -u 's/\x1b\[[0-9;]*m//g' >> "$LOG_FILE")
