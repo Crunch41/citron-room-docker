@@ -853,9 +853,10 @@ RUN apt-get update && \
 # Copy stripped binary
 COPY --from=builder /src/build/bin/citron-room /usr/local/bin/citron-room
 
-# Create citron user with default UID/GID (will be modified at runtime by entrypoint)
-RUN groupadd -g 1000 citron && \
-    useradd -u 1000 -g citron -m citron && \
+# Create citron user with UID/GID 911 (LinuxServer.io standard, avoids conflicts)
+# Will be modified at runtime by entrypoint to match PUID/PGID
+RUN groupadd -g 911 citron && \
+    useradd -u 911 -g citron -m citron && \
     mkdir -p /home/citron/.local/share/citron-room && \
     chown -R citron:citron /home/citron
 
