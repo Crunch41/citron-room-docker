@@ -1,10 +1,11 @@
 # Citron Room Server - Docker
 
-Dockerized Citron dedicated room server with critical bug fixes.
+Dockerized Citron dedicated room server with critical bug fixes and security patches.
 
 ## Quick Start
 
-### Private Room
+### Private Room (LAN/Friends Only)
+
 ```bash
 docker run -d -p 24872:24872/tcp -p 24872:24872/udp \
   -e ROOM_NAME="My Room" \
@@ -12,7 +13,10 @@ docker run -d -p 24872:24872/tcp -p 24872:24872/udp \
   crunch41/citron-room-server
 ```
 
-### Public Room
+### Public Room (Listed in Lobby)
+
+Requires a username and token from the Citron web API:
+
 ```bash
 docker run -d -p 24872:24872/tcp -p 24872:24872/udp \
   -e ROOM_NAME="My Public Room" \
@@ -23,43 +27,52 @@ docker run -d -p 24872:24872/tcp -p 24872:24872/udp \
   crunch41/citron-room-server
 ```
 
-### Working Example (Unraid)
-Real-world public room configuration running on Unraid:
-```bash
-docker run -d -p 24872:24872/tcp -p 24872:24872/udp \
-  -e ROOM_NAME="My Awesome Server" \
-  -e ROOM_DESCRIPTION="Welcome to my room!" \
-  -e PREFERRED_GAME="Mario Kart 8" \
-  -e PREFERRED_GAME_ID="0100152000022000" \
-  -e USERNAME="YourUsername" \
-  -e TOKEN="12345678-1234-1234-1234-123456789abc" \
-  -e WEB_API_URL="https://api.ynet-fun.xyz" \
-  -v /mnt/cache/appdata/citron-room:/home/citron/.local/share/citron-room \
-  crunch41/citron-room-server
-```
+---
 
 ## Environment Variables
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `ROOM_NAME` | **Yes** | - | Room name (shown in lobby) |
-| `PREFERRED_GAME` | **Yes** | - | Game name (shown in lobby) |
-| `ROOM_DESCRIPTION` | No | - | Room description |
-| `USERNAME` | For public | - | Your username |
-| `TOKEN` | For public | - | Your token (UUID) |
-| `WEB_API_URL` | For public | - | API URL |
-| `PREFERRED_GAME_ID` | No | 0 | Game ID (hex, e.g., 01006A800016E000) |
-| `MAX_MEMBERS` | No | 16 | Max players (2-254) |
-| `PASSWORD` | No | - | Room password |
-| `BIND_ADDRESS` | No | 0.0.0.0 | Bind IP address |
-| `PORT` | No | 24872 | Server port |
-| `ENABLE_CITRON_MODS` | No | false | Allow moderators |
-| `LOG_DIR` | No | /home/citron/.local/share/citron-room | Log directory |
-| `MAX_LOG_FILES` | No | 10 | Number of session logs to keep |
-| `PUID` | No | 99 | User ID for file permissions (Unraid: 99) |
-| `PGID` | No | 100 | Group ID for file permissions (Unraid: 100) |
+### Required
 
-**Note**: `ROOM_NAME` and `PREFERRED_GAME` are required by Citron. Server will fail to start without them.
+| Variable | Description |
+|----------|-------------|
+| `ROOM_NAME` | Room name displayed in the lobby |
+| `PREFERRED_GAME` | Game name displayed in the lobby |
+
+### Public Room Settings
+
+| Variable | Description |
+|----------|-------------|
+| `USERNAME` | Your Citron username (required for public rooms) |
+| `TOKEN` | Your authentication token (UUID format) |
+| `WEB_API_URL` | Lobby API URL (e.g., `https://api.ynet-fun.xyz`) |
+
+### Optional Settings
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ROOM_DESCRIPTION` | (empty) | Room description |
+| `PREFERRED_GAME_ID` | 0 | Game title ID in hex format |
+| `MAX_MEMBERS` | 16 | Maximum players (2-254) |
+| `PASSWORD` | (empty) | Room password |
+| `BIND_ADDRESS` | 0.0.0.0 | Network interface to bind |
+| `PORT` | 24872 | Server port |
+| `ENABLE_CITRON_MODS` | false | Allow community moderators |
+
+### File Permissions (Unraid/NAS)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PUID` | 99 | User ID for file ownership |
+| `PGID` | 100 | Group ID for file ownership |
+
+### Logging
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LOG_DIR` | /home/citron/.local/share/citron-room | Log directory |
+| `MAX_LOG_FILES` | 10 | Number of session logs to keep |
+
+---
 
 ## Docker Compose
 
@@ -77,31 +90,31 @@ services:
       USERNAME: "your_username"
       TOKEN: "your-token"
       WEB_API_URL: "https://api.ynet-fun.xyz"
-      PREFERRED_GAME_ID: "01006A800016E000"
     volumes:
       - ./data:/home/citron/.local/share/citron-room
     restart: unless-stopped
 ```
 
+---
+
 ## Persistent Data
 
-### Volume Mounting
-
-**Required for**:
-- ✅ Ban list persistence across restarts
-- ✅ Log file persistence across restarts
+Mount a volume to preserve data across container restarts:
 
 ```bash
--v /mnt/cache/appdata/citron-room:/home/citron/.local/share/citron-room
+-v /path/to/data:/home/citron/.local/share/citron-room
 ```
 
-**Without volume mount**:
-- ⚠️ Ban list resets on container restart
-- ⚠️ Logs are lost on container restart
+### What Gets Saved
+
+- **Ban list** - Persists username and IP bans
+- **Session logs** - Timestamped log files for each session
+
+Without a volume mount, all data is lost on container restart.
 
 ### Ban List Format
 
-File: `/home/citron/.local/share/citron-room/ban_list.txt`
+Location: `ban_list.txt` in the data directory
 
 ```
 CitronRoom-BanList-1
@@ -112,73 +125,81 @@ BadUsername2
 10.0.0.50
 ```
 
-**Structure**:
-- Line 1: Magic header (required)
-- Username bans (one per line)
-- Empty line separator
-- IP bans (one per line)
+Format:
+1. First line: Header (required, do not modify)
+2. Banned usernames (one per line)
+3. Empty line separator
+4. Banned IP addresses (one per line)
 
-### Logs
+### Log Files
 
-- **Console**: `docker logs <container-name>`
-- **Log files**: `/home/citron/.local/share/citron-room/session_DD-MM-YYYY_HH-MM-SS.log`
+- **Console output**: `docker logs <container-name>`
+- **Session logs**: `session_DD-MM-YYYY_HH-MM-SS.log`
 
-**Logging Features** ✨:
-- ✅ **Per-session logs** - Each container restart creates a new timestamped log
-- ✅ **Auto-cleanup** - Keeps last 10 session logs (configurable via `MAX_LOG_FILES`)
-- ✅ **Color support** - View logs with colors using `less -R` or `cat`
-- ✅ **Real timestamps** - Human-readable `[HH:MM:SS]` format
-- ✅ **Persistent** - Survives container restarts (requires volume mount)
+Logs use human-readable timestamps (`[HH:MM:SS]` format) and automatically rotate, keeping the most recent sessions.
 
-**Log files**:
-```
-session_25-12-2024_10-30-00.log   # Session 1
-session_25-12-2024_14-45-30.log   # Session 2
-session_26-12-2024_09-00-00.log   # Session 3 (newest)
-```
+---
 
 ## Bug Fixes Included
 
-This image includes **17 patches** fixing critical bugs and improving security:
+This image includes 17 patches that address critical issues in the vanilla Citron room server.
 
-**Core Fixes (Patches 1-7)**:
-1. ✅ **Container hanging** - Fixed stdin blocking loop
-2. ✅ **Public room crash** - Fixed missing `lobby_api_url` initialization
-3. ✅ **Username segfault** - Fixed NULL crash with username argument
-4. ✅ **JSON errors** - Added error handling to `Register()`
-5. ✅ **Thread crashes** - Added safety wrapper to announcement loop
-6. ✅ **Moderator logging** - Shows when users join with mod privileges
-7. ✅ **LAN moderator detection** - Enables mod powers on local connections
+### Stability Fixes
 
-**Network Improvements (Patches 8-10)**:
-8. ✅ **JWT error messaging** - Clearer error messages for verification failures
-9. ✅ **Unknown IP error suppression** - Cleaner logs (moved to DEBUG)
-10. ✅ **LDN packet loss fix** - Broadcast fallback for unknown IPs
+| # | Issue | Fix |
+|---|-------|-----|
+| 1 | Container hangs on startup | Removed stdin blocking loop |
+| 2 | Crash when registering public room | Fixed missing `lobby_api_url` |
+| 3 | Crash with `--username` flag | Changed to required_argument |
+| 4 | Crash on malformed API response | Added JSON error handling |
+| 5 | Silent thread crashes | Added exception wrapper |
 
-**Security Patches (Patches 11-17)**:
-11. ✅ **ServerLoop crash protection** - Exception handling in main loop
-12. ✅ **DoS rate limiting** - Rate limits join requests per IP
-13. ✅ **Race condition fix** - Thread-safe lock ordering documentation
-14. ✅ **Thread-safe JWT key** - Mutex protection for public key fetch
-15. ✅ **Malformed packet protection** - Validates packet size before parsing
-16. ✅ **IP generation safeguard** - Prevents infinite loop edge case
-17. ✅ **Cleaner log format** - Human-readable timestamps, removes verbose file paths
+### Feature Fixes
 
-### Moderator Features
+| # | Issue | Fix |
+|---|-------|-----|
+| 6 | No visibility of moderator joins | Added logging |
+| 7 | Moderator powers fail on LAN | Check nickname when JWT fails |
+| 8 | Noisy JWT error logs | Suppress common error code 2 |
+| 9 | Spam from unknown IP errors | Moved to DEBUG level |
+| 10 | LDN packet loss | Added broadcast fallback |
 
-**Server Owner Privileges**:
-- Set `USERNAME` to your Citron username
-- You'll automatically get moderator powers
-- Works on LAN even when JWT verification fails
+### Security Patches
 
-**Moderator Join Logs**:
+| # | Issue | Fix |
+|---|-------|-----|
+| 11 | Server crash from bad packets | Added main loop exception handling |
+| 12 | Join request flooding | Rate limiting per IP |
+| 13 | Thread safety | Documented lock ordering |
+| 14 | Data race in JWT key fetch | Added mutex protection |
+| 15 | Buffer overread from small packets | Added size validation |
+| 16 | Infinite loop in IP generation | Added attempt limit |
+| 17 | Unreadable log format | Human-readable timestamps |
+
+For technical details, see [PATCHES.md](PATCHES.md).
+
+---
+
+## Moderator Setup
+
+### Automatic Moderator Powers
+
+Set `USERNAME` to your Citron username. When you join the room, you automatically receive moderator privileges.
+
+This works on both:
+- **Internet connections** - Via JWT verification
+- **LAN connections** - Via nickname matching (Patch #7)
+
+### Log Output
+
 ```
-[Network] User 'YourName' (YourName) joined as MODERATOR
+[10:23:50] [192.168.1.100] YourName has joined.
+[10:23:50] User 'YourName' (YourName) joined as MODERATOR
 ```
 
-**📋 See [PATCHES.md](PATCHES.md) for complete technical analysis.**
+---
 
-## Building
+## Building from Source
 
 ```bash
 git clone https://github.com/Crunch41/citron-room-docker.git
@@ -186,15 +207,11 @@ cd citron-room-docker
 docker build -t citron-room-server .
 ```
 
-## For Citron Developers
+Build time is approximately 30-60 minutes (compiles the full Citron codebase).
 
-If you want to apply these fixes to upstream Citron, see **[PATCHES.md](PATCHES.md)** for:
-- Complete before/after code comparisons
-- Root cause analysis for each bug
-- GDB stack traces
-- Why each fix is necessary
+---
 
 ## Credits
 
 - [Citron Emulator Team](https://git.citron-emu.org/Citron)
-- Bug fixes by [Crunch41](https://github.com/Crunch41)
+- Bug fixes and Docker packaging by [Crunch41](https://github.com/Crunch41)

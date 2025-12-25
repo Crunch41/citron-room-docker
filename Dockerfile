@@ -86,7 +86,7 @@ if match:
         }'''
         
         content = content[:match.start()] + replacement + content[end_idx:]
-        print("✓ Patched stdin loop")
+        print("[OK] Patched stdin loop")
         p.write_text(content, encoding="utf-8")
     else:
         print("ERROR: Could not find closing brace")
@@ -118,7 +118,7 @@ matches = pattern.findall(content)
 if len(matches) >= 2:
     new_content = pattern.sub(add_lobby_line, content)
     p.write_text(new_content, encoding="utf-8")
-    print(f"✓ Fixed lobby_api_url ({len(matches)} locations)")
+    print(f"[OK] Fixed lobby_api_url ({len(matches)} locations)")
 else:
     print(f"ERROR: Expected 2 web_api_url assignments, found {len(matches)}")
     exit(1)
@@ -174,7 +174,7 @@ new_code = '''try {
 
 if pattern.search(content):
     content = pattern.sub(new_code, content)
-    print("✓ Added Register() error handling")
+    print("[OK] Added Register() error handling")
     p.write_text(content, encoding="utf-8")
 else:
     print("WARNING: Could not apply Register() fix")
@@ -224,7 +224,7 @@ if sig in content:
 '''
         content = before + new_body + remainder
         p.write_text(content, encoding="utf-8")
-        print("✓ Added thread safety wrapper")
+        print("[OK] Added thread safety wrapper")
     else:
         print("WARNING: Could not find function end")
 else:
@@ -245,7 +245,7 @@ replacement = '{"username", required_argument, 0, \'u\'}'
 
 if original in content:
     content = content.replace(original, replacement)
-    print("✓ Fixed username argument (required)")
+    print("[OK] Fixed username argument (required)")
     p.write_text(content, encoding="utf-8")
 else:
     print("WARNING: Could not find username argument")
@@ -286,7 +286,7 @@ replacement = """if (HasModPermission(event->peer)) {
 if search_pattern in content:
     content = content.replace(search_pattern, replacement)
     p.write_text(content, encoding="utf-8")
-    print("✓ Added moderator join logging with correct member lookup")
+    print("[OK] Added moderator join logging with correct member lookup")
 else:
     print("WARNING: Could not apply moderator logging patch")
 PY
@@ -323,7 +323,7 @@ replacement_string = """if (!room_information.host_username.empty() &&
 if search_string in content:
     content = content.replace(search_string, replacement_string)
     p.write_text(content, encoding="utf-8")
-    print("✓ Added LAN moderator detection (nickname check)")
+    print("[OK] Added LAN moderator detection (nickname check)")
 else:
     print("WARNING: Could not find HasModPermission pattern")
     # Try to print what we can find for debugging
@@ -334,7 +334,7 @@ else:
 PY
 
 # ---------------------------------------------------------------------------
-# PATCH 8: Improve JWT verification error messaging
+# PATCH 8: Suppress JWT verification error code 2 (common for all clients)
 # ---------------------------------------------------------------------------
 RUN python3 - <<'PY'
 from pathlib import Path
@@ -349,10 +349,8 @@ search_string = '''if (error) {
     }'''
 
 replacement_string = '''if (error) {
-        // Provide context for JWT verification failures
-        if (error.value() == 2) {
-            LOG_INFO(WebService, "JWT signature verification skipped (error code 2)");
-        } else {
+        // Skip logging for error code 2 (signature verification skipped - common/expected)
+        if (error.value() != 2) {
             LOG_INFO(WebService, "JWT verification failed: category={}, code={}, message={}",
                      error.category().name(), error.value(), error.message());
         }
@@ -362,10 +360,12 @@ replacement_string = '''if (error) {
 if search_string in content:
     content = content.replace(search_string, replacement_string)
     p.write_text(content, encoding="utf-8")
-    print("✓ Improved JWT verification error messaging")
+    print("[OK] Suppressed JWT error code 2 logging (all clients)")
 else:
     print("WARNING: Could not find JWT verification error pattern")
 PY
+
+
 
 # ---------------------------------------------------------------------------
 # PATCH 9: Suppress harmless unknown IP errors in HandleLdnPacket
@@ -391,7 +391,7 @@ matches = re.findall(pattern, content)
 if len(matches) >= 1:
     content = re.sub(pattern, replacement, content)
     p.write_text(content, encoding="utf-8")
-    print(f"✓ Suppressed {len(matches)} unknown IP error(s) (moved to DEBUG level)")
+    print(f"[OK] Suppressed {len(matches)} unknown IP error(s) (moved to DEBUG level)")
 else:
     print("INFO: PATCH 9 skipped (pattern not found in this Citron version)")
 PY
@@ -426,7 +426,7 @@ replacement = r'''\1
 if re.search(pattern, content):
     content = re.sub(pattern, replacement, content)
     p.write_text(content, encoding="utf-8")
-    print("✓ Added broadcast fallback for unknown IP packets")
+    print("[OK] Added broadcast fallback for unknown IP packets")
 else:
     print("INFO: PATCH 10 skipped (requires PATCH 9 - pattern not found in this Citron version)")
 PY
@@ -485,7 +485,7 @@ new_format = '''std::string FormatLogMessage(const Entry& entry) {
 if old_format in content:
     content = content.replace(old_format, new_format)
     p.write_text(content, encoding="utf-8")
-    print("✓ Patched log format to be cleaner and human-readable")
+    print("[OK] Patched log format to be cleaner and human-readable")
 else:
     print("WARNING: Could not find FormatLogMessage function")
 PY
@@ -554,7 +554,7 @@ if re.search(search_pattern, content):
         if old_end in content:
             content = content.replace(old_end, new_end)
             p.write_text(content, encoding="utf-8")
-            print("✓ Added ServerLoop exception handling")
+            print("[OK] Added ServerLoop exception handling")
         else:
             print("WARNING: Could not find ServerLoop end pattern")
     else:
@@ -621,7 +621,7 @@ if class_pattern in content:
             )
         
         p.write_text(content, encoding="utf-8")
-        print("✓ Added join request rate limiting")
+        print("[OK] Added join request rate limiting")
     else:
         print("WARNING: Could not find HandleJoinRequest start")
 else:
@@ -652,7 +652,7 @@ new_pattern = '''    // Notify everyone that the room information has changed.
 if old_pattern in content:
     content = content.replace(old_pattern, new_pattern)
     p.write_text(content, encoding="utf-8")
-    print("✓ Added race condition documentation (lock order is correct)")
+    print("[OK] Added race condition documentation (lock order is correct)")
 else:
     # The race condition is actually handled correctly - HasModPermission has its own lock
     print("INFO: PATCH 13 - Lock order verified correct, no change needed")
@@ -690,7 +690,7 @@ if old_static in content:
         )
     
     p.write_text(content, encoding="utf-8")
-    print("✓ Added thread-safe GetPublicKey")
+    print("[OK] Added thread-safe GetPublicKey")
 else:
     print("WARNING: Could not find GetPublicKey pattern")
 PY
@@ -723,7 +723,7 @@ new_join = '''void Room::RoomImpl::HandleJoinRequest(const ENetEvent* event) {
 if old_join in content:
     content = content.replace(old_join, new_join)
     p.write_text(content, encoding="utf-8")
-    print("✓ Added packet bounds validation to HandleJoinRequest")
+    print("[OK] Added packet bounds validation to HandleJoinRequest")
 else:
     # Try without rate limiting patch
     old_join_fallback = '''void Room::RoomImpl::HandleJoinRequest(const ENetEvent* event) {
@@ -743,7 +743,7 @@ else:
     if old_join_fallback in content:
         content = content.replace(old_join_fallback, new_join_fallback)
         p.write_text(content, encoding="utf-8")
-        print("✓ Added packet bounds validation to HandleJoinRequest (fallback)")
+        print("[OK] Added packet bounds validation to HandleJoinRequest (fallback)")
     else:
         print("WARNING: Could not find HandleJoinRequest for packet validation")
 PY
@@ -796,7 +796,7 @@ new_func = '''IPv4Address Room::RoomImpl::GenerateFakeIPAddress() {
 if old_func in content:
     content = content.replace(old_func, new_func)
     p.write_text(content, encoding="utf-8")
-    print("✓ Added IP generation infinite loop safeguard")
+    print("[OK] Added IP generation infinite loop safeguard")
 else:
     print("WARNING: Could not find GenerateFakeIPAddress function")
 PY

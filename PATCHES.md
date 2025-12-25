@@ -1,27 +1,67 @@
-# Citron Room Server - Complete Patch Analysis
+# Citron Room Server - Patch Documentation
 
-All patches applied to fix critical bugs in vanilla Citron dedicated room server.
+Technical documentation for all patches applied to the Citron dedicated room server.
 
 ## Overview
 
-**Total Patches**: 17  
-**Image Size**: ~380MB (compressed ~130MB)  
-**Build Type**: Release (optimized, stripped)  
-**Status**: ✅ Production Ready
+| Property | Value |
+|----------|-------|
+| Total Patches | 17 |
+| Image Size | ~380MB (compressed ~130MB) |
+| Build Type | Release (optimized, stripped) |
+| Status | Production Ready |
 
 ---
 
-## Patch #1: Stdin Loop Fix
+## Patch Summary
 
-**Purpose**: Prevent container from hanging waiting for console input
+### Critical Fixes
+
+| # | File | Issue | Fix |
+|---|------|-------|-----|
+| 2 | citron_room.cpp | NULL crash on public room registration | Initialize `lobby_api_url` from `web_api_url` |
+| 5 | citron_room.cpp | Segfault with `--username` flag | Change `optional_argument` to `required_argument` |
+| 7 | room.cpp | Moderator powers fail on LAN | Check nickname when JWT verification fails |
+| 10 | room.cpp | LDN packet loss for unknown IPs | Broadcast fallback when destination unknown |
+| 11 | room.cpp | Server crash from exceptions | Add try/catch to main ServerLoop |
+| 15 | room.cpp | Buffer overread from small packets | Validate packet size before parsing |
+
+### Stability Fixes
+
+| # | File | Issue | Fix |
+|---|------|-------|-----|
+| 1 | citron_room.cpp | Container hangs on startup | Remove stdin blocking loop |
+| 3 | announce_room_json.cpp | Crash on malformed API response | Add JSON parsing error handling |
+| 4 | announce_multiplayer_session.cpp | Silent thread crashes | Add exception wrapper to announcement loop |
+| 14 | verify_user_jwt.cpp | Data race in JWT key fetch | Add mutex protection |
+| 16 | room.cpp | Infinite loop in IP generation | Add attempt limit |
+
+### Quality of Life
+
+| # | File | Issue | Fix |
+|---|------|-------|-----|
+| 6 | room.cpp | No visibility when moderators join | Add logging for moderator joins |
+| 8 | verify_user_jwt.cpp | Noisy JWT error logs | Suppress common error code 2 |
+| 9 | room.cpp | Log spam from unknown IP routing | Move to DEBUG level |
+| 12 | room.cpp | No protection against join flooding | Rate limit per IP |
+| 13 | room.cpp | Lock ordering concerns | Document correct ordering |
+| 17 | text_formatter.cpp | Unreadable log timestamps | Human-readable HH:MM:SS format |
+
+---
+
+## Detailed Patch Descriptions
+
+### Patch #1: Stdin Loop Fix
 
 **File**: `src/dedicated_room/citron_room.cpp`
+
+**Problem**: The server waits for console input in a loop, which blocks forever in Docker containers that have no interactive stdin.
 
 **Before**:
 ```cpp
 while (room->GetState() == Network::Room::State::Open) {
     std::string in;
-    std::cin >> in;  // ← BLOCKS waiting for input
+    std::cin >> in;  // Blocks waiting for input
     if (in.size() > 0) {
         break;
     }
@@ -36,20 +76,18 @@ while (room->GetState() == Network::Room::State::Open) {
 }
 ```
 
-**Why Needed**: Docker containers don't have interactive stdin, causing the original loop to hang.
-
 ---
 
-## Patch #2: lobby_api_url Fix ⭐ CRITICAL
-
-**Purpose**: Fix NULL crash when announcing public rooms
+### Patch #2: lobby_api_url Initialization (CRITICAL)
 
 **File**: `src/dedicated_room/citron_room.cpp`
+
+**Problem**: Public room registration crashes because `lobby_api_url` is never initialized.
 
 **Before**:
 ```cpp
 Settings::values.web_api_url = web_api_url;
-// lobby_api_url NEVER SET!
+// lobby_api_url never set
 ```
 
 **After**:
@@ -58,99 +96,41 @@ Settings::values.web_api_url = web_api_url;
 Settings::values.lobby_api_url = Settings::values.web_api_url.GetValue();
 ```
 
-**Why Needed**: `AnnounceMultiplayerSession` reads `lobby_api_url.GetValue()` to initialize backend. Without this, it gets an empty string, causing connection errors or crashes.
-
-**GDB Stack Trace**:
+**Stack Trace**:
 ```
 #0  strlen () at /lib/x86_64-linux-gnu/libc.so.6
-#1  std::char_traits<char>::length () at /usr/include/c++/13/bits/char_traits.h
-#2  std::__cxx11::basic_string<char>::assign () at string
+#1  std::char_traits<char>::length ()
+#2  std::__cxx11::basic_string<char>::assign ()
 #3  Network::AnnounceMultiplayerSession::AnnounceMultiplayerSession()
 ```
 
 ---
 
-## Patch #3: Register() Error Handling
-
-**Purpose**: Gracefully handle JSON parsing errors
+### Patch #3: Register() Error Handling
 
 **File**: `src/web_service/announce_room_json.cpp`
 
-**Before**:
-```cpp
-auto reply_json = nlohmann::json::parse(result.returned_data);  // Can throw!
-room = reply_json.get<AnnounceMultiplayerRoom::Room>();         // Can throw!
-room_id = reply_json.at("id").get<std::string>();               // Can throw!
-```
+**Problem**: JSON parsing exceptions crash the server when API returns malformed data.
 
-**After**:
-```cpp
-try {
-    if (result.returned_data.empty()) {
-        LOG_ERROR(WebService, "Registration response is empty");
-        return WebService::WebResult{WebService::WebResult::Code::WrongContent, 
-                                     "Empty response from server", ""};
-    }
-    
-    auto reply_json = nlohmann::json::parse(result.returned_data);
-    
-    if (!reply_json.contains("id")) {
-        LOG_ERROR(WebService, "Registration response missing 'id' field");
-        return WebService::WebResult{WebService::WebResult::Code::WrongContent, 
-                                     "Missing room ID in response", ""};
-    }
-    
-    room = reply_json.get<AnnounceMultiplayerRoom::Room>();
-    room_id = reply_json.at("id").get<std::string>();
-    result.returned_data = room_id;
-    
-} catch (const std::exception& e) {
-    LOG_ERROR(WebService, "Registration parsing error: {}", e.what());
-    return WebService::WebResult{WebService::WebResult::Code::WrongContent, 
-                                 "Invalid JSON in response", ""};
-}
-```
-
-**Why Needed**: Malformed API responses would crash the server. Now errors are logged and handled gracefully.
+**Fix**: Wrap JSON operations in try/catch, validate response contains required fields before access.
 
 ---
 
-## Patch #4: Thread Safety Wrapper
-
-**Purpose**: Prevent silent crashes in announcement thread
+### Patch #4: Thread Safety Wrapper
 
 **File**: `src/network/announce_multiplayer_session.cpp`
 
-**Before**:
-```cpp
-void AnnounceMultiplayerSession::AnnounceMultiplayerLoop() {
-    // Entire function body...
-    // Any uncaught exception terminates entire process!
-}
-```
+**Problem**: Uncaught exceptions in announcement thread call `std::terminate()`, crashing the entire server silently.
 
-**After**:
-```cpp
-void AnnounceMultiplayerSession::AnnounceMultiplayerLoop() {
-    try {
-        // Entire function body...
-    } catch (const std::exception& e) {
-        LOG_ERROR(Network, "Announce thread crashed: {}", e.what());
-    } catch (...) {
-        LOG_ERROR(Network, "Announce thread crashed (unknown)");
-    }
-}
-```
-
-**Why Needed**: Background threads that throw exceptions call `std::terminate()`, crashing the entire server with no logs.
+**Fix**: Wrap `AnnounceMultiplayerLoop()` body in try/catch block with error logging.
 
 ---
 
-## Patch #5: Username NULL Crash ⭐ CRITICAL
-
-**Purpose**: Fix instant segfault with `--username` argument
+### Patch #5: Username Argument Fix (CRITICAL)
 
 **File**: `src/dedicated_room/citron_room.cpp`
+
+**Problem**: Using `--username "value"` with a space causes segfault because `optarg` is NULL.
 
 **Before**:
 ```cpp
@@ -162,129 +142,60 @@ void AnnounceMultiplayerSession::AnnounceMultiplayerLoop() {
 {"username", required_argument, 0, 'u'}
 ```
 
-**Context**:
-```cpp
-case 'u':
-    username.assign(optarg);  // ← CRASHES if optarg is NULL
-    break;
-```
+---
 
-**Why Needed**: When `--username "value"` is passed with a space, `getopt_long` with `optional_argument` sets `optarg` to NULL. This causes `strlen(NULL)` → instant segfault.
+### Patch #6: Moderator Join Logging
 
-**GDB Stack Trace**:
+**File**: `src/network/room.cpp`
+
+**Problem**: No indication when users join with moderator privileges.
+
+**Fix**: Log message when user is granted moderator status:
 ```
-#0  strlen () at /lib/x86_64-linux-gnu/libc.so.6
-#1  std::char_traits<char>::length ()
-#2  std::__cxx11::basic_string<char>::assign (optarg)
-#3  main () at citron_room.cpp:257
+User 'YourName' (YourName) joined as MODERATOR
 ```
 
 ---
 
-## Patch #6: Moderator Join Logging
-
-**Purpose**: Log when users join with moderator privileges
+### Patch #7: LAN Moderator Detection (CRITICAL)
 
 **File**: `src/network/room.cpp`
 
+**Problem**: Moderator powers don't work on LAN because JWT verification always fails, leaving `user_data.username` empty.
+
+**Fix**: Also check `nickname` against `host_username` when JWT-derived username is empty.
+
 **Before**:
 ```cpp
-if (HasModPermission(event->peer)) {
-    SendJoinSuccessAsMod(event->peer, preferred_fake_ip);
-} else {
-    SendJoinSuccess(event->peer, preferred_fake_ip);
+if (sending_member->user_data.username == room_information.host_username) {
+    return true;
 }
 ```
 
 **After**:
 ```cpp
-if (HasModPermission(event->peer)) {
-    // Log moderator join (lookup from members list since member was moved)
-    std::lock_guard lock(member_mutex);
-    const auto mod_member = std::find_if(members.begin(), members.end(),
-        [&event](const auto& m) { return m.peer == event->peer; });
-    if (mod_member != members.end()) {
-        LOG_INFO(Network, "User '{}' ({}) joined as MODERATOR", 
-                 mod_member->nickname, mod_member->user_data.username);
-    }
-    SendJoinSuccessAsMod(event->peer, preferred_fake_ip);
-} else {
-    SendJoinSuccess(event->peer, preferred_fake_ip);
+if (sending_member->user_data.username == room_information.host_username) {
+    return true;
 }
-```
-
-**Why Needed**: Server owners need to verify moderator status is working correctly.
-
-**Output**:
-```
-[Network] User 'Crunch41' (Crunch41) joined as MODERATOR
+if (sending_member->nickname == room_information.host_username) {
+    return true;
+}
 ```
 
 ---
 
-## Patch #7: LAN Moderator Detection ⭐ CRITICAL
-
-**Purpose**: Enable moderator permissions on LAN when JWT verification fails
-
-**File**: `src/network/room.cpp`
-
-**Before**:
-```cpp
-bool HasModPermission(ENetPeer* client) const {
-    // Only checks user_data.username (from JWT)
-    if (!room_information.host_username.empty() &&
-        sending_member->user_data.username == room_information.host_username) {
-        return true;
-    }
-    return false;
-}
-```
-
-**After**:
-```cpp
-bool HasModPermission(ENetPeer* client) const {
-    // Check JWT username (for internet play)
-    if (!room_information.host_username.empty() &&
-        sending_member->user_data.username == room_information.host_username) {
-        return true;
-    }
-    
-    // Also check nickname for LAN connections (when JWT verification fails)
-    if (!room_information.host_username.empty() &&
-        sending_member->nickname == room_information.host_username) {
-        return true;
-    }
-    
-    return false;
-}
-```
-
-**Why Needed**: 
-- LAN connections always fail JWT verification: `Verification failed: signature format is incorrect`
-- When JWT fails, `user_data.username` is empty
-- `nickname` is always populated, even on LAN
-- Without this patch, server owners can't moderate their own LAN servers
-
-**Expected Logs**:
-```
-[WebService] Verification failed: category=decode, code=2, message=signature format is incorrect
-[Network] [192.168.10.20] Crunch41 has joined.
-[Network] User 'Crunch41' (Crunch41) joined as MODERATOR  ← Now works!
-```
-
----
-
-## Patch #8: Improved JWT Error Messaging
-
-**Purpose**: Provide clearer error messages for JWT verification failures
+### Patch #8: JWT Error Suppression
 
 **File**: `src/web_service/verify_user_jwt.cpp`
+
+**Problem**: Error code 2 (signature format incorrect) is logged for every client that doesn't authenticate via the Citron web API, which is most players.
+
+**Fix**: Suppress logging for error code 2 specifically. Other JWT errors are still logged.
 
 **Before**:
 ```cpp
 if (error) {
-    LOG_INFO(WebService, "Verification failed: category={}, code={}, message={}",
-             error.category().name(), error.value(), error.message());
+    LOG_INFO(WebService, "Verification failed: ...");
     return {};
 }
 ```
@@ -292,482 +203,162 @@ if (error) {
 **After**:
 ```cpp
 if (error) {
-    // Provide context for JWT verification failures
-    if (error.value() == 2) {
-        LOG_INFO(WebService, "JWT signature verification skipped (error code 2)");
-    } else {
-        LOG_INFO(WebService, "JWT verification failed: category={}, code={}, message={}",
-                 error.category().name(), error.value(), error.message());
+    if (error.value() != 2) {
+        LOG_INFO(WebService, "JWT verification failed: ...");
     }
     return {};
 }
 ```
 
-**Why Needed**:
-- Error code 2 (signature format) is very common for LAN connections
-- Original message was confusing - users thought something was broken
-- New message clarifies this is expected behavior for error code 2
-- Other JWT errors still show detailed diagnostic information
-
-**Output Changes**:
-```
-OLD: [WebService] Verification failed: category=decode, code=2, message=signature format is incorrect
-
-NEW: [WebService] JWT signature verification skipped (error code 2)
-```
-
 ---
 
-## Patch #9: Suppress Unknown IP Errors
-
-**Purpose**: Reduce log spam from harmless LDN packet routing warnings
+### Patch #9: Unknown IP Error Suppression
 
 **File**: `src/network/room.cpp`
 
-**Before**:
-```cpp
-LOG_ERROR(Network, "Attempting to send to unknown IP address: {}", dest_ip.ToString());
-return;
-```
+**Problem**: LDN packets contain players' home network IPs which the server can't route, generating constant error logs.
 
-**After**:
-```cpp
-LOG_DEBUG(Network, "Packet to unknown IP (broadcasting instead): {}", dest_ip.ToString());
-// ... continue with broadcast fallback ...
-```
-
-**Why Needed**:
-- Nintendo Switch LDN protocol embeds players' home network IPs (192.168.x.x) in packets
-- Server can't route to these IPs → logs error
-- **This is harmless** - gameplay works fine without routing these specific packets
-- Moving to DEBUG level reduces log noise while keeping info available for debugging
-
-**Error Example**:
-```
-[3684.382363] Network <Error> network/room.cpp:HandleLdnPacket:939: 
-                                 Attempting to send to unknown IP address: 192.168.205.164
-```
-
-This is just the player's home network IP, not a real error.
+**Fix**: Move from ERROR to DEBUG level.
 
 ---
 
-## Patch #10: LDN Broadcast Fallback ⭐ NEW
-
-**Purpose**: Fix LDN packet loss by broadcasting when destination IP is unknown
+### Patch #10: LDN Broadcast Fallback (CRITICAL)
 
 **File**: `src/network/room.cpp`
 
-**Before**:
-```cpp
-auto dest_member = GetMemberByFakeIpAddress(dest_ip);
-if (dest_member == nullptr) {
-    LOG_DEBUG(Network, "Unknown IP");
-    return;  // ← Packet dropped!
-}
-```
+**Problem**: Packets to unknown IPs are dropped, causing packet loss in LDN games.
 
-**After**:
-```cpp
-auto dest_member = GetMemberByFakeIpAddress(dest_ip);
-if (dest_member == nullptr) {
-    LOG_DEBUG(Network, "Packet to unknown IP (broadcasting instead): {}", dest_ip.ToString());
-    
-    // Broadcast to all other members as fallback
-    std::lock_guard lock(member_mutex);
-    for (const auto& member : members) {
-        if (member.peer != event->peer) {
-            ENetPacket* fwd_packet = enet_packet_create(
-                event->packet->data,
-                event->packet->dataLength,
-                ENET_PACKET_FLAG_RELIABLE
-            );
-            enet_peer_send(member.peer, 0, fwd_packet);
-        }
-    }
-    return;
-}
-```
-
-**How It Works**:
-1. Server tries to find destination by fake IP
-2. If not found (because packet contains home network IP), **broadcast instead of drop**
-3. Packet reaches intended recipient even if exact IP is unknown
-
-**Why This Works**:
-- Most LDN traffic is broadcast anyway (game discovery, player sync)
-- Small rooms (2-8 players) = minimal overhead
-- **Guarantees delivery** instead of packet loss
-
-**Benefits**:
-- ✅ No packet loss for unknown IPs
-- ✅ Works for all LDN games
-- ✅ Minimal overhead for typical room sizes
-- ✅ Eliminates root cause, not just symptoms
+**Fix**: Broadcast to all members when destination IP is unknown instead of dropping.
 
 ---
 
-## Summary Table
-
-| Patch | File | Severity | Fixes |
-|-------|------|----------|-------|
-| #1 | citron_room.cpp | Medium | Container hanging |
-| #2 | citron_room.cpp | **CRITICAL** | NULL crash on public rooms |
-| #3 | announce_room_json.cpp | Medium | JSON parsing crashes |
-| #4 | announce_multiplayer_session.cpp | Medium | Silent thread crashes |
-| #5 | citron_room.cpp | **CRITICAL** | Instant segfault with username |
-| #6 | room.cpp | Low | Moderator visibility |
-| #7 | room.cpp | **CRITICAL** | LAN moderator permissions |
-| #8 | verify_user_jwt.cpp | Low | **JWT error messaging** |
-| #9 | room.cpp | Low | **Unknown IP error spam** |
-| #10 | room.cpp | **CRITICAL** | **LDN packet loss fix** |
-
----
-
-## Final Log Output
-
-**With all 10 patches applied**:
-```
-[Network] Room is open. Close with Q+Enter...
-[WebService] Room has been registered
-[WebService] JWT signature verification skipped (error code 2)
-[Network] [192.168.10.100] Crunch41 has joined.
-[Network] User 'Crunch41' (Crunch41) joined as MODERATOR
-[Network] [111.111.111.111] RemotePlayer has joined.
-```
-
-Clean, informative, accurate LAN detection, no packet loss! ✨
-
----
-
-## Verification
-
-**All patches applied successfully**:
-```
-✓ Patched stdin loop
-✓ Fixed lobby_api_url (2 locations)
-✓ Added Register() error handling
-✓ Added thread safety wrapper
-✓ Fixed username argument (required)
-✓ Added moderator join logging with correct member lookup
-✓ Added LAN moderator detection (nickname check)
-✓ Added IsPrivateIP helper to verify_user_jwt.cpp
-✓ Improved JWT verification error messaging
-✓ Suppressed unknown IP errors (moved to DEBUG level)
-✓ Added broadcast fallback for unknown IP packets
-```
-
-**Build Configuration**:
-- CMake: Release build type
-- Binary: Stripped
-- No debug tools in production image
-- Final size: ~380MB uncompressed, ~130MB compressed
-
----
-
-## For Citron Developers
-
-All 10 patches are production-ready and can be submitted upstream to fix these critical issues in the vanilla Citron Room Server.
-
-**New in this release** (Patches 8-10):
-- **Accurate LAN detection** using IP address validation instead of JWT error codes
-- **Zero LDN packet loss** with broadcast fallback for unknown IPs
-- **Cleaner logs** without harmless unknown IP errors
-
----
-
-## Patch #11: ServerLoop Exception Handling ⭐ CRITICAL
-
-**Purpose**: Prevent server crashes from unhandled exceptions in packet handlers
+### Patch #11: ServerLoop Exception Handling (CRITICAL)
 
 **File**: `src/network/room.cpp`
 
-**Before**:
-```cpp
-void Room::RoomImpl::ServerLoop() {
-    while (state != State::Closed) {
-        ENetEvent event;
-        if (enet_host_service(server, &event, 5) > 0) {
-            // Any exception here terminates the entire process!
-            switch (event.type) { ... }
-        }
-    }
-}
-```
+**Problem**: Any exception in the main server loop terminates the process.
 
-**After**:
-```cpp
-void Room::RoomImpl::ServerLoop() {
-    while (state != State::Closed) {
-        try {
-            ENetEvent event;
-            if (enet_host_service(server, &event, 5) > 0) {
-                switch (event.type) { ... }
-            }
-        } catch (const std::exception& e) {
-            LOG_ERROR(Network, "ServerLoop error: {}", e.what());
-        } catch (...) {
-            LOG_ERROR(Network, "ServerLoop unknown error");
-        }
-    }
-}
-```
-
-**Why Needed**: The main server loop had no exception safety. Any unhandled exception (e.g., from malformed packets, network errors) would call `std::terminate()` and crash the entire server silently.
+**Fix**: Wrap ServerLoop body in try/catch to log errors and continue operation.
 
 ---
 
-## Patch #12: Rate Limiting for Join Requests
-
-**Purpose**: Prevent DoS attacks by rate limiting join requests per IP
+### Patch #12: Rate Limiting
 
 **File**: `src/network/room.cpp`
 
-**Added Code**:
-```cpp
-// In RoomImpl class:
-std::unordered_map<u32, std::chrono::steady_clock::time_point> last_join_attempt;
-static constexpr auto JOIN_RATE_LIMIT = std::chrono::seconds(1);
+**Problem**: No protection against join request flooding (DoS).
 
-// In HandleJoinRequest:
-auto now = std::chrono::steady_clock::now();
-u32 client_ip = event->peer->address.host;
-if (last_join_attempt.count(client_ip)) {
-    if (now - last_join_attempt[client_ip] < JOIN_RATE_LIMIT) {
-        LOG_WARNING(Network, "Rate limiting join request");
-        return;
-    }
-}
-last_join_attempt[client_ip] = now;
-```
-
-**Why Needed**: Without rate limiting, an attacker could:
-- Flood the server with join requests
-- Exhaust server resources
-- DoS the JWT verification endpoint
+**Fix**: Track last join attempt per IP, reject if less than 1 second since previous attempt.
 
 ---
 
-## Patch #13: Race Condition Documentation
-
-**Purpose**: Document that the lock ordering in HandleJoinRequest is correct
+### Patch #13: Lock Ordering Documentation
 
 **File**: `src/network/room.cpp`
 
-**Analysis**: After review, `HasModPermission()` acquires its own lock internally, making the lock ordering safe. Added documentation comment to clarify this for future maintainers.
+**Problem**: Potential race condition concerns in HandleJoinRequest.
+
+**Result**: After analysis, lock ordering is correct. Added documentation comments.
 
 ---
 
-## Patch #14: Thread-Safe GetPublicKey
-
-**Purpose**: Prevent data race when fetching JWT public key
+### Patch #14: Thread-Safe GetPublicKey
 
 **File**: `src/web_service/verify_user_jwt.cpp`
 
-**Before**:
-```cpp
-static std::string public_key;  // No thread safety!
+**Problem**: Multiple threads can race to fetch and write the static public key.
 
-std::string GetPublicKey(const std::string& host) {
-    if (public_key.empty()) {
-        // Two threads could enter here simultaneously
-        public_key = client.GetPlain("/jwt/external/key.pem", true).returned_data;
-    }
-    return public_key;
-}
-```
-
-**After**:
-```cpp
-static std::string public_key;
-static std::mutex public_key_mutex;
-
-std::string GetPublicKey(const std::string& host) {
-    std::lock_guard<std::mutex> lock(public_key_mutex);
-    if (public_key.empty()) {
-        public_key = client.GetPlain("/jwt/external/key.pem", true).returned_data;
-    }
-    return public_key;
-}
-```
-
-**Why Needed**: If two users join simultaneously before the JWT public key is fetched, both threads would try to fetch and write to the same static variable, causing undefined behavior.
+**Fix**: Add mutex protection around the key fetch and storage.
 
 ---
 
-## Patch #15: Packet Bounds Validation ⭐ CRITICAL
-
-**Purpose**: Prevent crashes from malformed packets
+### Patch #15: Packet Bounds Validation (CRITICAL)
 
 **File**: `src/network/room.cpp`
 
-**Added Code**:
-```cpp
-void Room::RoomImpl::HandleJoinRequest(const ENetEvent* event) {
-    // Minimum packet size validation
-    if (event->packet->dataLength < 12) {
-        LOG_WARNING(Network, "Malformed join request: packet too small ({} bytes)", 
-                   event->packet->dataLength);
-        return;
-    }
-    // ... rest of handler
-}
-```
+**Problem**: Packets are read without checking if sufficient data exists.
 
-**Why Needed**: The original code read from packets without checking if there was enough data. A malicious client could send a truncated packet and cause:
-- Buffer over-reads
-- Crashes
-- Potential security vulnerabilities
+**Fix**: Validate minimum packet size before parsing.
 
 ---
 
-## Patch #16: IP Generation Infinite Loop Safeguard
-
-**Purpose**: Prevent server hang if all fake IPs are taken
+### Patch #16: IP Generation Safeguard
 
 **File**: `src/network/room.cpp`
 
-**Before**:
-```cpp
-IPv4Address GenerateFakeIPAddress() {
-    IPv4Address result_ip{192, 168, 0, 0};
-    do {
-        // Generate random IP
-    } while (!IsValidFakeIPAddress(result_ip));  // Could loop forever!
-    return result_ip;
-}
-```
+**Problem**: Fake IP generation loop has no exit condition if all IPs are exhausted.
 
-**After**:
-```cpp
-IPv4Address GenerateFakeIPAddress() {
-    IPv4Address result_ip{192, 168, 0, 0};
-    constexpr int MAX_ATTEMPTS = 10000;
-    int attempts = 0;
-    
-    do {
-        // Generate random IP
-        if (++attempts > MAX_ATTEMPTS) {
-            LOG_ERROR(Network, "Failed to generate unique fake IP after {} attempts", MAX_ATTEMPTS);
-            return {0, 0, 0, 0};  // Sentinel value
-        }
-    } while (!IsValidFakeIPAddress(result_ip));
-    return result_ip;
-}
-```
-
-**Why Needed**: While unlikely (max 254 members, 65536 possible IPs), the function had no safeguard against infinite loops. Now it fails gracefully after 10,000 attempts.
+**Fix**: Add maximum attempt counter (10,000) with error logging.
 
 ---
 
-## Patch #17: Cleaner Log Format
-
-**Purpose**: Make logs human-readable with real timestamps
+### Patch #17: Log Format Cleanup
 
 **File**: `src/common/logging/text_formatter.cpp`
 
+**Problem**: Logs show uptime in seconds and verbose file paths, difficult to read.
+
 **Before**:
 ```
-[359443.476077] Network <Info> network/room.cpp:SendStatusMessage:770: [1.121.194.75] BBBCNews has joined.
-[359443.476113] Network <Info> network/room.cpp:HandleGameInfoPacket:1047: BBBCNews is playing Super Smash Bros. Ultimate (13.0.4)
+[359443.476077] Network <Info> network/room.cpp:SendStatusMessage:770: [1.1.1.1] User joined.
 ```
 
 **After**:
 ```
-[10:23:45] [1.121.194.75] BBBCNews has joined.
-[10:23:45] BBBCNews is playing Super Smash Bros. Ultimate (13.0.4)
+[10:23:45] [1.1.1.1] User joined.
 ```
 
-**Changes Made**:
-- Real wall-clock timestamps (HH:MM:SS) instead of uptime in seconds
-- Removed verbose file path and line numbers for info-level messages
-- Warnings and errors still show class and level for debugging
-- Much cleaner and easier to read
-
-**Why Needed**: The original format was designed for developers debugging the emulator, not for server operators monitoring a room. Real timestamps and clean messages make logs actionable.
-
 ---
 
-## Updated Summary Table
+## Sample Output
 
-| Patch | File | Severity | Fixes |
-|-------|------|----------|-------|
-| #1 | citron_room.cpp | Medium | Container hanging |
-| #2 | citron_room.cpp | **CRITICAL** | NULL crash on public rooms |
-| #3 | announce_room_json.cpp | Medium | JSON parsing crashes |
-| #4 | announce_multiplayer_session.cpp | Medium | Silent thread crashes |
-| #5 | citron_room.cpp | **CRITICAL** | Instant segfault with username |
-| #6 | room.cpp | Low | Moderator visibility |
-| #7 | room.cpp | **CRITICAL** | LAN moderator permissions |
-| #8 | verify_user_jwt.cpp | Low | JWT error messaging |
-| #9 | room.cpp | Low | Unknown IP error spam |
-| #10 | room.cpp | **CRITICAL** | LDN packet loss fix |
-| #11 | room.cpp | **CRITICAL** | ServerLoop crash protection |
-| #12 | room.cpp | Medium | DoS rate limiting |
-| #13 | room.cpp | Low | Race condition documentation |
-| #14 | verify_user_jwt.cpp | Medium | Thread-safe JWT key fetch |
-| #15 | room.cpp | **CRITICAL** | Malformed packet protection |
-| #16 | room.cpp | Medium | IP generation safeguard |
-| #17 | text_formatter.cpp | Low | Human-readable log format |
+With all patches applied:
 
----
-
-## Final Log Output
-
-**With all 17 patches applied**:
 ```
 [10:23:45] Room is open. Close with Q+Enter...
 [10:23:45] Room has been registered
-[10:23:50] JWT signature verification skipped (error code 2)
 [10:23:50] [192.168.10.100] Crunch41 has joined.
 [10:23:50] User 'Crunch41' (Crunch41) joined as MODERATOR
 [10:24:15] [111.111.111.111] RemotePlayer has joined.
 [10:24:16] RemotePlayer is playing Super Smash Bros. Ultimate (13.0.4)
 ```
 
-Clean, informative, secure, and crash-resistant! ✨
+---
+
+## Build Verification
+
+All patches apply successfully during Docker build:
+
+```
+Patched stdin loop
+Fixed lobby_api_url (2 locations)
+Added Register() error handling
+Added thread safety wrapper
+Fixed username argument (required)
+Added moderator join logging
+Added LAN moderator detection (nickname check)
+Suppressed JWT error code 2 logging
+Suppressed unknown IP errors (moved to DEBUG level)
+Added broadcast fallback for unknown IP packets
+Added ServerLoop exception handling
+Added join request rate limiting
+Added race condition documentation
+Added thread-safe GetPublicKey
+Added packet bounds validation
+Added IP generation infinite loop safeguard
+Patched log format to be cleaner and human-readable
+```
 
 ---
 
-## Verification
+## For Upstream Contributors
 
-**All patches applied successfully**:
-```
-✓ Patched stdin loop
-✓ Fixed lobby_api_url (2 locations)
-✓ Added Register() error handling
-✓ Added thread safety wrapper
-✓ Fixed username argument (required)
-✓ Added moderator join logging with correct member lookup
-✓ Added LAN moderator detection (nickname check)
-✓ Improved JWT verification error messaging
-✓ Suppressed unknown IP errors (moved to DEBUG level)
-✓ Added broadcast fallback for unknown IP packets
-✓ Added ServerLoop exception handling
-✓ Added join request rate limiting
-✓ Added race condition documentation
-✓ Added thread-safe GetPublicKey
-✓ Added packet bounds validation
-✓ Added IP generation infinite loop safeguard
-✓ Patched log format to be cleaner and human-readable
-```
+All 17 patches are production-tested and ready for upstream submission.
 
-**Build Configuration**:
-- CMake: Release build type
-- Binary: Stripped
-- No debug tools in production image
-- Final size: ~380MB uncompressed, ~130MB compressed
-
----
-
-## For Citron Developers
-
-All 17 patches are production-ready and can be submitted upstream to fix these critical issues in the vanilla Citron Room Server.
-
-**Security & UX Patches** (Patches 11-17):
-- **ServerLoop crash protection** - Prevents entire server from dying on exceptions
-- **DoS rate limiting** - Limits join requests per IP
-- **Thread-safe JWT key** - Fixes data race in public key fetch
-- **Malformed packet protection** - Validates packet size before parsing
-- **IP generation safeguard** - Prevents infinite loop edge case
-- **Cleaner log format** - Human-readable timestamps, no verbose file paths
+**Files Modified**:
+- `src/dedicated_room/citron_room.cpp` (Patches 1, 2, 5)
+- `src/network/room.cpp` (Patches 6, 7, 9, 10, 11, 12, 13, 15, 16)
+- `src/web_service/verify_user_jwt.cpp` (Patches 8, 14)
+- `src/web_service/announce_room_json.cpp` (Patch 3)
+- `src/network/announce_multiplayer_session.cpp` (Patch 4)
+- `src/common/logging/text_formatter.cpp` (Patch 17)
