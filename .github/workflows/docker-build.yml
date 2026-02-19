@@ -1,9 +1,6 @@
 name: Build on Citron Room Changes
 
 on:
-  # Check for citron-room updates daily at 2 AM UTC
-  schedule:
-    - cron: '0 2 * * *'
   # Allow manual trigger
   workflow_dispatch:
   # Build on Dockerfile changes (for our patches)
